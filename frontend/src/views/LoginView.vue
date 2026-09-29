@@ -166,15 +166,19 @@
             </a>
           </div>
 
+          <p v-if="errorMessage" class="text-sm text-rose-400 -mt-1">{{ errorMessage }}</p>
+
           <!-- Submit -->
           <button
-            type="submit"
-            class="w-full h-[58px] rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 text-base font-bold text-white flex items-center justify-center gap-3 shadow-lg shadow-rose-900/30 transition-all duration-300 hover:brightness-110 hover:shadow-rose-600/30 active:scale-[0.98]"          >
-            <span>Sign In</span>
-            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M5 12h14" />
-              <path d="m12 5 7 7-7 7" />
-            </svg>
+              type="submit"
+              :disabled="isLoading"
+              class="w-full h-[58px] rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 text-base font-bold text-white flex items-center justify-center gap-3 shadow-lg shadow-rose-900/30 transition-all duration-300 hover:brightness-110 hover:shadow-rose-600/30 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+              <span>{{ isLoading ? 'Signing in…' : 'Sign In' }}</span>
+              <svg v-if="!isLoading" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14" />
+                <path d="m12 5 7 7-7 7" />
+              </svg>
           </button>
         </form>
       </div>
@@ -184,13 +188,19 @@
 
 <script setup>
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+import api from '@/services/api'
 import loginBg from '../assets/login-bg.jpg'
+
+const router = useRouter()
 
 const username = ref('')
 const password = ref('')
 const role = ref('dispatcher')
 const rememberMe = ref(false)
 const showPassword = ref(false)
+const errorMessage = ref('')
+const isLoading = ref(false)
 
 const roles = [
   {
@@ -205,7 +215,32 @@ const roles = [
   }
 ]
 
-const handleLogin = () => {
-  console.log('Login:', username.value, role.value)
+const handleLogin = async () => {
+  errorMessage.value = ''
+
+  if (!username.value || !password.value) {
+    errorMessage.value = 'Please enter both an Operator ID and Password.'
+    return
+  }
+
+  isLoading.value = true
+  try {
+    const { data } = await api.post('/auth/login', {
+      username: username.value,
+      password: password.value,
+      role: role.value,
+    })
+
+    const storage = rememberMe.value ? localStorage : sessionStorage
+    storage.setItem('token', data.token)
+    storage.setItem('user', JSON.stringify(data.user))
+
+    if (data.user.role === 'dispatcher') router.push('/dispatch')
+    else router.push('/field')
+  } catch (err) {
+    errorMessage.value = err.response?.data?.message || 'Login failed. Please try again.'
+  } finally {
+    isLoading.value = false
+  }
 }
 </script>
