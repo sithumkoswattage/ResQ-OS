@@ -1,21 +1,58 @@
 <template>
-  <div class="min-h-screen grid lg:grid-cols-2 bg-[#0d1322] text-slate-200">
-
-    <!-- ============ LEFT: IMAGE PANEL ============ -->
-    <!-- Make sure to place the image in your src/assets folder -->
-    <aside
-      class="relative hidden lg:block overflow-hidden bg-cover bg-center bg-no-repeat border-r border-slate-800"
-      :style="{
-        backgroundImage: `url('${loginBg}')`,
-        backgroundPosition: 'left center'
-      }"
+    <div 
+      class="min-h-screen w-full relative bg-cover bg-center bg-no-repeat flex items-center justify-center lg:justify-end px-6 py-12 sm:px-12 lg:pr-[10%] text-slate-200"
+      :style="{ backgroundImage: `url('${loginBg}')` }"
     >
-      <div class="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-[#0d1322]"></div>
-    </aside>
+      <!-- Optional slight dark tint over the image -->
+      <div class="absolute inset-0 bg-[#0d1322]/20 pointer-events-none"></div>
 
-    <!-- ============ RIGHT: FORM PANEL ============ -->
-    <main class="relative flex items-center justify-center px-6 py-12 sm:px-12 lg:px-16">
-      <div class="w-full max-w-[480px]">
+      <!-- The form wrapper -->
+      <main class="relative z-10 w-full max-w-[480px]">
+
+        <!-- Logo -->
+        <div class="flex items-center gap-3 mb-7 px-2">
+
+          <div
+            class="w-14 h-14 rounded-xl
+                  bg-gradient-to-br from-rose-600 to-orange-600
+                  flex items-center justify-center
+                  shadow-lg shadow-rose-900/40"
+          >
+            <!-- SVG -->
+          </div>
+
+          <div>
+            <h2 class="text-3xl font-extrabold tracking-tight text-white leading-none">
+              ResQ<span class="text-rose-600">-OS</span>
+            </h2>
+
+            <p class="mt-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-870">
+              Emergency Response & Resource Dispatch Platform
+            </p>
+          </div>
+
+        </div>
+
+        
+        <!-- The Frosted Glass Box -->
+        <div
+          class="relative w-full rounded-[26px]
+                bg-[#0d1322]/55
+                backdrop-blur-xl
+                border border-white/[0.12]
+                shadow-[0_24px_60px_rgba(0,0,0,0.40)]
+                p-7 sm:p-9
+                overflow-hidden"
+        >
+
+        <!-- Glass highlight -->
+        <div
+          class="absolute inset-x-6 top-0 h-px
+                bg-gradient-to-r
+                from-transparent
+                via-white/20
+                to-transparent"
+        ></div>
 
         <!-- Mobile-only logo -->
         <div class="lg:hidden flex items-center gap-3 mb-10">
@@ -28,31 +65,13 @@
           <span class="text-2xl font-extrabold text-white">ResQ<span class="text-rose-600">-OS</span></span>
         </div>
 
-        <!-- Desktop Logo (Moved from left panel) -->
-        <div class="hidden lg:flex items-center gap-3 mb-10">
-          <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-rose-600 to-orange-600 flex items-center justify-center shadow-lg shadow-rose-900/40">
-            <svg class="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
-              <path d="m9 12 2 2 4-4" />
-            </svg>
-          </div>
-          <div>
-            <h2 class="text-3xl font-extrabold tracking-tight text-white leading-none">
-              ResQ<span class="text-rose-600">-OS</span>
-            </h2>
-            <p class="mt-1 text-[1px] font-bold uppercase tracking-[0.2em] text-slate-400">
-              Emergency Response & Resource Dispatch Platform
-            </p>
-          </div>
-        </div>
-
         <h2 class="text-3xl font-bold tracking-tight text-white">Sign in to ResQ-OS</h2>
-        <p class="mt-3 text-lg text-slate-400">Access the Emergency Response Command Center</p>
+        <p class="mt-2 text-lg text-slate-400">Access the Emergency Response Command Center</p>
 
-        <form class="mt-8 space-y-4" @submit.prevent="handleLogin">
+        <form class="mt-5 space-y-4" @submit.prevent="handleLogin">
 
           <!-- Role tabs -->
-          <div class="flex gap-1 rounded-2xl border border-slate-700/60 bg-slate-800/30 p-2">
+          <div class="flex gap-1 rounded-2xl border border-white/[0.10] bg-black/20 backdrop-blur-md p-1.5">
             <button
               v-for="r in roles"
               :key="r.value"
@@ -61,8 +80,8 @@
               :class="[
                 'flex-1 flex items-center justify-center gap-2.5 rounded-xl border py-2.5 text-sm font-semibold transition-all duration-200',
                 role === r.value
-                  ? 'bg-slate-700/50 border-slate-500/60 text-white shadow-md'
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'bg-white/[0.10] border-white/[0.20] text-white shadow-lg shadow-black/10'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
               ]"
             >
               <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="r.icon"></svg>
@@ -77,7 +96,17 @@
               type="text"
               autocomplete="username"
               placeholder="Operator ID / Username"
-              class="w-full h-[58px] rounded-2xl border border-slate-700/70 bg-[#0f1729] pl-4 pr-12 text-base text-white placeholder-slate-500 outline-none transition-all focus:border-rose-500 focus:ring-4 focus:ring-rose-500/15"
+              class="w-full h-[58px] rounded-2xl
+                    border border-white/[0.12]
+                    bg-black/20
+                    focus:bg-black/30
+                    pl-4 pr-12
+                    text-base text-white
+                    placeholder-slate-400
+                    outline-none
+                    transition-all
+                    focus:border-rose-500
+                    focus:ring-4 focus:ring-rose-500/15"
             />
             <svg class="absolute right-5 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-500 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="8" r="4" />
@@ -92,7 +121,17 @@
               :type="showPassword ? 'text' : 'password'"
               autocomplete="current-password"
               placeholder="Password"
-              class="w-full h-[58px] rounded-2xl border border-slate-700/70 bg-[#0f1729] pl-4 pr-12 text-base text-white placeholder-slate-500 outline-none transition-all focus:border-rose-500 focus:ring-4 focus:ring-rose-500/15"
+              class="w-full h-[58px] rounded-2xl
+                  border border-white/[0.12]
+                  bg-black/20
+                  focus:bg-black/30
+                  pl-4 pr-12
+                  text-base text-white
+                  placeholder-slate-400
+                  outline-none
+                  transition-all
+                  focus:border-rose-500
+                  focus:ring-4 focus:ring-rose-500/15"
             />
             <button
               type="button"
