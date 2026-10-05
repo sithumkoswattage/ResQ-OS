@@ -31,14 +31,3 @@ const router = createRouter({
 })
 
 export default router
-
-router.beforeEach((to, from, next) => {
-  const publicPages = ['/', '/login']
-  const authRequired = !publicPages.includes(to.path)
-  const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-
-  if (authRequired && !token) {
-    return next('/')
-  }
-  next()
-})
