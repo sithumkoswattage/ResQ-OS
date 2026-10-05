@@ -189,7 +189,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import api from '@/services/api'
+import api from '@/services/api.js'
 import loginBg from '../assets/login-bg.jpg'
 
 const router = useRouter()
