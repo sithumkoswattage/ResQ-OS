@@ -89,13 +89,14 @@
             </button>
           </div>
 
-          <!-- Operator ID -->
+          <!-- Email -->
           <div class="relative">
             <input
               v-model="username"
-              type="text"
-              autocomplete="username"
-              placeholder="Operator ID / Username"
+              type="email"
+              autocomplete="email"
+              placeholder="Email address"
+              required
               class="w-full h-[58px] rounded-2xl
                     border border-white/[0.12]
                     bg-black/20
@@ -121,6 +122,7 @@
               :type="showPassword ? 'text' : 'password'"
               autocomplete="current-password"
               placeholder="Password"
+              required
               class="w-full h-[58px] rounded-2xl
                   border border-white/[0.12]
                   bg-black/20
@@ -151,6 +153,10 @@
             </button>
           </div>
 
+          <p v-if="errorMessage" class="text-sm text-rose-300" role="alert">
+            {{ errorMessage }}
+          </p>
+
           <!-- Options -->
           <div class="flex items-center justify-between">
             <label class="flex items-center gap-3 cursor-pointer group">
@@ -169,8 +175,9 @@
           <!-- Submit -->
           <button
             type="submit"
-            class="w-full h-[58px] rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 text-base font-bold text-white flex items-center justify-center gap-3 shadow-lg shadow-rose-900/30 transition-all duration-300 hover:brightness-110 hover:shadow-rose-600/30 active:scale-[0.98]"          >
-            <span>Sign In</span>
+            :disabled="isSubmitting"
+            class="w-full h-[58px] rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 text-base font-bold text-white flex items-center justify-center gap-3 shadow-lg shadow-rose-900/30 transition-all duration-300 hover:brightness-110 hover:shadow-rose-600/30 active:scale-[0.98] disabled:cursor-wait disabled:opacity-70">
+            <span>{{ isSubmitting ? 'Signing in...' : 'Sign In' }}</span>
             <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M5 12h14" />
               <path d="m12 5 7 7-7 7" />
@@ -184,13 +191,17 @@
 
 <script setup>
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import loginBg from '../assets/login-bg.jpg'
 
+const router = useRouter()
 const username = ref('')
 const password = ref('')
 const role = ref('dispatcher')
 const rememberMe = ref(false)
 const showPassword = ref(false)
+const isSubmitting = ref(false)
+const errorMessage = ref('')
 
 const roles = [
   {
@@ -205,7 +216,34 @@ const roles = [
   }
 ]
 
-const handleLogin = () => {
-  console.log('Login:', username.value, role.value)
+const handleLogin = async () => {
+  errorMessage.value = ''
+  isSubmitting.value = true
+
+  try {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: username.value, password: password.value }),
+    })
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Unable to sign in.')
+    }
+    if (data.role !== role.value) {
+      throw new Error('This account does not have the selected role.')
+    }
+    if (data.role !== 'dispatcher') {
+      throw new Error('Field unit access is not available yet.')
+    }
+
+    sessionStorage.setItem('token', data.token)
+    await router.push('/dispatcher')
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'Unable to sign in.'
+  } finally {
+    isSubmitting.value = false
+  }
 }
 </script>
