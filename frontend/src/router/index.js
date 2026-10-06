@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import LoginView from '../views/LoginView.vue'
-import DashboardView from '../views/Dispatcher/DashboardView.vue'
+import DashboardView from '../views/DispatcherDashboardView.vue'
 import DispatcherLayout from '../layouts/DispatcherLayout.vue'
 
 const routes = [
@@ -32,6 +32,7 @@ const router = createRouter({
 
 export default router
 
+/*
 router.beforeEach((to, from, next) => {
   const publicPages = ['/', '/login']
   const authRequired = !publicPages.includes(to.path)
@@ -42,3 +43,4 @@ router.beforeEach((to, from, next) => {
   }
   next()
 })
+  */

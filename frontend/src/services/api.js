@@ -7,4 +7,15 @@ const api = axios.create({
   }
 })
 
+const incidents = [
+  {
+    id: 1042,
+    type: 'Fire',
+    location: 'Colombo',
+    priority: 'Critical',
+    status: 'Active'
+  },
+  // ...
+]
+
 export default api

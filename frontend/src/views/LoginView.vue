@@ -235,7 +235,7 @@ const handleLogin = async () => {
     storage.setItem('token', data.token)
     storage.setItem('user', JSON.stringify(data.user))
 
-    if (data.user.role === 'dispatcher') router.push('/dispatch')
+    if (data.user.role === 'dispatcher') router.push('/dispatcher')
     else router.push('/field')
   } catch (err) {
     errorMessage.value = err.response?.data?.message || 'Login failed. Please try again.'
