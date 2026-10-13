@@ -11,11 +11,6 @@ router.post('/register', async (req, res) => {
             return res.status(400).json({ message: "Username, email, and password are required" });
         }
 
-        // Normalize 'field' role to 'responder'
-        if (role === 'field') {
-            role = 'responder';
-        }
-
         let user = await User.findOne({ $or: [{ email }, { username }] });
         if (user) return res.status(400).json({ message: "User with this email or username already exists" });
 
