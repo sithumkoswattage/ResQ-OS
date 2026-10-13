@@ -95,7 +95,8 @@
               v-model="username"
               type="text"
               autocomplete="username"
-              placeholder="Operator ID / Username"
+              placeholder="Operator ID / Email address"
+              required
               class="w-full h-[58px] rounded-2xl
                     border border-white/[0.12]
                     bg-black/20
@@ -121,6 +122,7 @@
               :type="showPassword ? 'text' : 'password'"
               autocomplete="current-password"
               placeholder="Password"
+              required
               class="w-full h-[58px] rounded-2xl
                   border border-white/[0.12]
                   bg-black/20
@@ -151,6 +153,20 @@
             </button>
           </div>
 
+          <!-- Error Message Alert -->
+          <div
+            v-if="errorMessage"
+            class="rounded-xl border border-rose-500/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-200 flex items-center gap-2"
+            role="alert"
+          >
+            <svg class="w-5 h-5 flex-shrink-0 text-rose-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span>{{ errorMessage }}</span>
+          </div>
+
           <!-- Options -->
           <div class="flex items-center justify-between">
             <label class="flex items-center gap-3 cursor-pointer group">
@@ -169,11 +185,17 @@
           <!-- Submit -->
           <button
             type="submit"
-            class="w-full h-[58px] rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 text-base font-bold text-white flex items-center justify-center gap-3 shadow-lg shadow-rose-900/30 transition-all duration-300 hover:brightness-110 hover:shadow-rose-600/30 active:scale-[0.98]"          >
-            <span>Sign In</span>
-            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            :disabled="isSubmitting"
+            class="w-full h-[58px] rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 text-base font-bold text-white flex items-center justify-center gap-3 shadow-lg shadow-rose-900/30 transition-all duration-300 hover:brightness-110 hover:shadow-rose-600/30 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <span>{{ isSubmitting ? 'Signing in...' : 'Sign In' }}</span>
+            <svg v-if="!isSubmitting" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M5 12h14" />
               <path d="m12 5 7 7-7 7" />
+            </svg>
+            <svg v-else class="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
             </svg>
           </button>
         </form>
@@ -184,13 +206,17 @@
 
 <script setup>
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import loginBg from '../assets/login-bg.jpg'
 
+const router = useRouter()
 const username = ref('')
 const password = ref('')
 const role = ref('dispatcher')
 const rememberMe = ref(false)
 const showPassword = ref(false)
+const isSubmitting = ref(false)
+const errorMessage = ref('')
 
 const roles = [
   {
@@ -199,13 +225,49 @@ const roles = [
     icon: '<path d="M4 4h16v12H4z"/><path d="M8 20h8"/><path d="M12 16v4"/>'
   },
   {
-    value: 'field',
+    value: 'responder',
     label: 'Field Unit',
     icon: '<path d="M5 11h14v8H5z"/><path d="M7 11V7h10v4"/><circle cx="8" cy="19" r="1.5"/><circle cx="16" cy="19" r="1.5"/>'
   }
 ]
 
-const handleLogin = () => {
-  console.log('Login:', username.value, role.value)
+const handleLogin = async () => {
+  errorMessage.value = ''
+  if (!username.value.trim() || !password.value) {
+    errorMessage.value = 'Please enter your Operator ID/Email and Password.'
+    return
+  }
+
+  isSubmitting.value = true
+  try {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identifier: username.value.trim(),
+        password: password.value,
+        role: role.value
+      })
+    })
+
+    const data = await response.json()
+    if (!response.ok) {
+      throw new Error(data.message || 'Sign in failed. Please check your credentials.')
+    }
+
+    const storage = rememberMe.value ? localStorage : sessionStorage
+    storage.setItem('token', data.token)
+    storage.setItem('user', JSON.stringify(data.user || { username: data.username, role: data.role }))
+
+    if (data.role === 'dispatcher') {
+      await router.push('/dispatcher')
+    } else {
+      errorMessage.value = 'Field responder portal is currently undergoing scheduled maintenance.'
+    }
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : 'Unable to connect to the server.'
+  } finally {
+    isSubmitting.value = false
+  }
 }
 </script>
