@@ -14,6 +14,7 @@ mongoose.connect(process.env.MONGO_URI)
     .catch(err => console.error('Database connection error:', err));
 
 app.use('/api/auth', authRoutes);
+app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'ResQ-OS Backend' }));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`ResQ-OS Server running on port ${PORT}`));
