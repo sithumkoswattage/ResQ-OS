@@ -19,18 +19,18 @@
       class="absolute inset-0 transition-colors duration-1000 pointer-events-none"
       :class="role === 'dispatcher' ? 'bg-[#0d1322]/35' : 'bg-[#1a0709]/45'"
     ></div>
-    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40 pointer-events-none"></div>
+    <div class="absolute inset-0 bg-linear-to-t from-black/80 via-transparent to-black/40 pointer-events-none"></div>
 
     <!-- The form wrapper -->
-    <main class="relative z-10 w-full max-w-[480px]">
+    <main class="relative z-10 w-full max-w-120">
 
       <!-- Logo -->
       <div class="flex items-center gap-3 mb-7 px-2">
         <div
           class="w-14 h-14 rounded-xl flex items-center justify-center shadow-lg transition-all duration-500"
           :class="role === 'dispatcher'
-            ? 'bg-gradient-to-br from-rose-600 to-orange-600 shadow-rose-900/40'
-            : 'bg-gradient-to-br from-amber-600 to-rose-600 shadow-amber-900/40'"
+            ? 'bg-linear-to-br from-rose-600 to-orange-600 shadow-rose-900/40'
+            : 'bg-linear-to-br from-amber-600 to-rose-600 shadow-amber-900/40'"
         >
           <svg class="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
@@ -50,10 +50,10 @@
 
       <!-- The Frosted Glass Box -->
       <div
-        class="relative w-full rounded-[26px] bg-[#0d1322]/60 backdrop-blur-xl border border-white/[0.12] shadow-[0_24px_60px_rgba(0,0,0,0.50)] p-7 sm:p-9 overflow-hidden transition-all duration-500"
+        class="relative w-full rounded-[26px] bg-[#0d1322]/60 backdrop-blur-xl border border-white/12 shadow-[0_24px_60px_rgba(0,0,0,0.50)] p-7 sm:p-9 overflow-hidden transition-all duration-500"
       >
         <!-- Glass highlight -->
-        <div class="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent"></div>
+        <div class="absolute inset-x-6 top-0 h-px bg-linear-to-r from-transparent via-white/25 to-transparent"></div>
 
         <h2 class="text-3xl font-bold tracking-tight text-white">Sign in to ResQ-OS</h2>
         <div class="mt-2 text-sm text-slate-300 flex items-center gap-2">
@@ -68,13 +68,13 @@
 
         <form class="mt-5 space-y-4" @submit.prevent="handleLogin">
           <!-- Fluid Segmented Role Tabs -->
-          <div class="relative rounded-2xl border border-white/[0.12] bg-black/40 backdrop-blur-md p-1.5 overflow-hidden">
+          <div class="relative rounded-2xl border border-white/12 bg-black/40 backdrop-blur-md p-1.5 overflow-hidden">
             <!-- Animated sliding pill indicator -->
             <div
               class="absolute top-1.5 bottom-1.5 rounded-xl transition-all duration-300 ease-out shadow-lg"
               :class="role === 'dispatcher'
-                ? 'left-1.5 w-[calc(50%-6px)] bg-gradient-to-r from-rose-600 to-orange-600 shadow-rose-950/60 border border-white/20'
-                : 'left-[calc(50%+3px)] w-[calc(50%-9px)] bg-gradient-to-r from-amber-600 to-rose-600 shadow-amber-950/60 border border-white/20'"
+                ? 'left-1.5 w-[calc(50%-6px)] bg-linear-to-r from-rose-600 to-orange-600 shadow-rose-950/60 border border-white/20'
+                : 'left-[calc(50%+3px)] w-[calc(50%-9px)] bg-linear-to-r from-amber-600 to-rose-600 shadow-amber-950/60 border border-white/20'"
             ></div>
 
             <div class="relative z-10 flex">
@@ -110,8 +110,8 @@
               autocomplete="username"
               placeholder="Operator ID / Email address"
               required
-              class="w-full h-[58px] rounded-2xl
-                    border border-white/[0.12]
+              class="w-full h-14.5 rounded-2xl
+                    border border-white/12
                     bg-black/20
                     focus:bg-black/30
                     pl-4 pr-12
@@ -136,8 +136,8 @@
               autocomplete="current-password"
               placeholder="Password"
               required
-              class="w-full h-[58px] rounded-2xl
-                  border border-white/[0.12]
+              class="w-full h-14.5 rounded-2xl
+                  border border-white/12
                   bg-black/20
                   focus:bg-black/30
                   pl-4 pr-12
@@ -166,13 +166,21 @@
             </button>
           </div>
 
+          <div
+            v-if="route.query.redirect"
+            class="rounded-xl border border-sky-500/30 bg-sky-950/30 px-4 py-3 text-sm text-sky-100"
+            role="status"
+          >
+            Sign in with a dispatcher account to access the command center.
+          </div>
+
           <!-- Error Message Alert -->
           <div
             v-if="errorMessage"
             class="rounded-xl border border-rose-500/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-200 flex items-center gap-2"
             role="alert"
           >
-            <svg class="w-5 h-5 flex-shrink-0 text-rose-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg class="w-5 h-5 shrink-0 text-rose-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10" />
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
@@ -199,10 +207,10 @@
           <button
             type="submit"
             :disabled="isSubmitting"
-            class="w-full h-[58px] rounded-xl text-base font-bold text-white flex items-center justify-center gap-3 shadow-lg transition-all duration-300 hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+            class="w-full h-14.5 rounded-xl text-base font-bold text-white flex items-center justify-center gap-3 shadow-lg transition-all duration-300 hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
             :class="role === 'dispatcher'
-              ? 'bg-gradient-to-r from-rose-600 to-orange-600 shadow-rose-900/35 hover:shadow-rose-600/30'
-              : 'bg-gradient-to-r from-amber-600 to-rose-600 shadow-amber-900/35 hover:shadow-amber-600/30'"
+              ? 'bg-linear-to-r from-rose-600 to-orange-600 shadow-rose-900/35 hover:shadow-rose-600/30'
+              : 'bg-linear-to-r from-amber-600 to-rose-600 shadow-amber-900/35 hover:shadow-amber-600/30'"
           >
             <span>{{ isSubmitting ? 'Authenticating...' : (role === 'dispatcher' ? 'Sign in to Command Center' : 'Sign in to Field Operations') }}</span>
             <svg v-if="!isSubmitting" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -222,10 +230,11 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import loginBg from '../assets/login-bg.jpg'
 import fieldBg from '../assets/field-bg.jpg'
 
+const route = useRoute()
 const router = useRouter()
 const username = ref('')
 const password = ref('')
@@ -284,7 +293,13 @@ const handleLogin = async () => {
     const userRole = data.user?.role ?? data.role ?? role.value
 
     if (userRole === 'dispatcher') {
-      await router.push('/dispatcher')
+      const redirect = route.query.redirect
+      const target = typeof redirect === 'string' &&
+        (redirect === '/dispatcher' || redirect.startsWith('/dispatcher/'))
+        ? redirect
+        : '/dispatcher'
+
+      await router.push(target)
     } else if (userRole === 'responder') {
       errorMessage.value = 'Field responder portal is currently undergoing scheduled maintenance.'
     } else {
