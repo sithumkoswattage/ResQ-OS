@@ -7,6 +7,7 @@ import DashboardView from '../views/DispatcherDashboardView.vue'
 import IncidentsView from '../views/IncidentsView.vue'
 import IncidentDetailsView from '../views/IncidentDetailsView.vue'
 import ResourcesView from '../views/ResourcesView.vue'
+import CommandCenterView from '../views/CommandCenterView.vue'
 
 const routes = [
   {
@@ -37,6 +38,11 @@ const routes = [
         path: 'resources',
         name: 'resources',
         component: ResourcesView
+      },
+      {
+        path: 'command-center',
+        name: 'command-center',
+        component: CommandCenterView
       }
     ]
   }

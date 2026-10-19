@@ -7,7 +7,9 @@
         <p class="page-description">A quick view of incidents and field-unit readiness.</p>
       </div>
       <div class="header-actions">
-        <span class="sample-label"><span class="sample-dot"></span> Sample data</span>
+        <span class="sample-label" :class="{ 'connection-error': loadError }">
+          <span class="sample-dot"></span>{{ loadError ? 'Data unavailable' : 'Connected data' }}
+        </span>
         <RouterLink class="primary-button" to="/dispatcher/incidents">
           <Plus :size="18" aria-hidden="true" />
           <span>View incidents</span>
@@ -27,6 +29,7 @@
         <h2 class="stat-label">{{ stat.label }}</h2>
       </article>
     </section>
+    <p v-if="loadError" class="load-error" role="alert">{{ loadError }}</p>
 
     <div class="dashboard-grid">
       <section class="panel incidents-panel">
@@ -62,6 +65,7 @@
             </span>
             <ChevronRight class="row-chevron" :size="17" aria-hidden="true" />
           </RouterLink>
+          <p v-if="!loading && !recentIncidents.length" class="empty-message">No incidents have been reported.</p>
         </div>
       </section>
 
@@ -85,7 +89,7 @@
         </div>
 
         <ul class="unit-list">
-          <li v-for="unit in units" :key="unit.name" class="unit-row">
+          <li v-for="unit in displayUnits" :key="unit.unitCode" class="unit-row">
             <span class="unit-avatar" :class="`unit-${unit.status}`">
               <component :is="unit.icon" :size="17" aria-hidden="true" />
             </span>
@@ -97,6 +101,7 @@
               <span></span>{{ unit.statusLabel }}
             </span>
           </li>
+          <li v-if="!loading && !units.length" class="empty-message">No resources have been added.</li>
         </ul>
 
         <RouterLink class="secondary-button" to="/dispatcher/resources">
@@ -133,21 +138,21 @@
 
     <p class="demo-note">
       <Info :size="15" aria-hidden="true" />
-      This overview uses sample information; live incident and resource feeds are not connected yet.
+      This overview uses dispatch data. Open the
+      <RouterLink to="/dispatcher/command-center">Command Center</RouterLink>
+      for the operational map.
     </p>
   </section>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
   Ambulance,
   ArrowRight,
   ArrowUpRight,
-  Check,
   ChevronRight,
-  Clock3,
   Flame,
   HeartPulse,
   Info,
@@ -157,90 +162,99 @@ import {
   ShieldAlert,
   Truck
 } from 'lucide-vue-next'
+import api from '../services/api'
 
-const recentIncidents = [
-  {
-    id: 'INC-2048',
-    title: 'Residential building fire',
-    location: 'Grandpass, Colombo',
-    priority: 'critical',
-    priorityLabel: 'Critical',
-    time: '4 min ago',
-    icon: Flame
-  },
-  {
-    id: 'INC-2047',
-    title: 'Medical emergency',
-    location: 'Cinnamon Gardens',
-    priority: 'high',
-    priorityLabel: 'High',
-    time: '11 min ago',
-    icon: HeartPulse
-  },
-  {
-    id: 'INC-2046',
-    title: 'Multi-vehicle collision',
-    location: 'D.R. Wijewardena Mawatha',
-    priority: 'medium',
-    priorityLabel: 'Medium',
-    time: '18 min ago',
-    icon: Ambulance
-  },
-  {
-    id: 'INC-2045',
-    title: 'Flooding reported',
-    location: 'Wellawatte, Colombo',
-    priority: 'low',
-    priorityLabel: 'Low',
-    time: '32 min ago',
-    icon: ShieldAlert
-  }
-]
+const incidents = ref([])
+const units = ref([])
+const loading = ref(true)
+const loadError = ref('')
+let refreshTimer
 
-const units = [
-  { name: 'Rescue 01', type: 'Fire & rescue', status: 'dispatched', statusLabel: 'Dispatched', icon: Truck },
-  { name: 'Medical 03', type: 'Ambulance', status: 'available', statusLabel: 'Available', icon: Ambulance },
-  { name: 'Rescue 04', type: 'Fire & rescue', status: 'available', statusLabel: 'Available', icon: Truck },
-  { name: 'Patrol 02', type: 'Rapid response', status: 'standby', statusLabel: 'Standby', icon: Radio }
-]
-
-const activities = [
-  {
-    id: 'dispatch',
-    title: 'Unit dispatched',
-    detail: 'Rescue 01 assigned to INC-2048',
-    time: '4 min ago',
-    tone: 'urgent',
-    icon: Truck
-  },
-  {
-    id: 'incident',
-    title: 'New incident received',
-    detail: 'Residential building fire · Grandpass',
-    time: '6 min ago',
+const recentIncidents = computed(() => incidents.value.slice(0, 4).map((incident) => ({
+  id: incident._id,
+  title: incident.title,
+  location: incident.location,
+  priority: incident.priority,
+  priorityLabel: titleCase(incident.priority),
+  time: timeAgo(incident.createdAt),
+  icon: incidentIcon(incident.type)
+})))
+const displayUnits = computed(() => units.value.slice(0, 4).map((unit) => ({
+  ...unit,
+  statusLabel: titleCase(unit.status),
+  icon: unit.type.toLowerCase().includes('ambulance') ? Ambulance : Truck
+})))
+const availableUnits = computed(() => units.value.filter((unit) => unit.status === 'available').length)
+const activities = computed(() => [
+  ...incidents.value.map((incident) => ({
+    id: `incident-${incident._id}`,
+    timestamp: new Date(incident.createdAt).getTime(),
+    title: 'Incident reported',
+    detail: `${incident.title} · ${incident.location}`,
+    time: timeAgo(incident.createdAt),
     tone: 'warning',
-    icon: Flame
-  },
-  {
-    id: 'available',
-    title: 'Unit back in service',
-    detail: 'Medical 03 marked available',
-    time: '19 min ago',
-    tone: 'success',
-    icon: Check
-  }
-]
-
-const activeIncidents = computed(() => recentIncidents.length)
-const availableUnits = computed(() => units.filter((unit) => unit.status === 'available').length)
+    icon: incidentIcon(incident.type)
+  })),
+  ...units.value.map((unit) => ({
+    id: `resource-${unit._id}`,
+    timestamp: new Date(unit.updatedAt).getTime(),
+    title: unit.status === 'dispatched' ? 'Unit dispatched' : 'Unit status updated',
+    detail: `${unit.name} · ${titleCase(unit.status)}`,
+    time: timeAgo(unit.updatedAt),
+    tone: unit.status === 'available' ? 'success' : 'urgent',
+    icon: unit.type.toLowerCase().includes('ambulance') ? Ambulance : Truck
+  }))
+].sort((a, b) => b.timestamp - a.timestamp).slice(0, 3))
 const stats = computed(() => [
-  { label: 'Active incidents', value: activeIncidents.value, context: 'Across all zones', icon: ShieldAlert, tone: 'red' },
-  { label: 'Units dispatched', value: units.filter((unit) => unit.status === 'dispatched').length, context: 'Responding now', icon: Truck, tone: 'blue' },
+  { label: 'Active incidents', value: incidents.value.length, context: 'Across all zones', icon: ShieldAlert, tone: 'red' },
+  { label: 'Units dispatched', value: units.value.filter((unit) => unit.status === 'dispatched').length, context: 'Responding now', icon: Truck, tone: 'blue' },
   { label: 'Units available', value: availableUnits.value, context: 'Ready to deploy', icon: Radio, tone: 'green' },
-  { label: 'Avg. response time', value: '06:42', context: 'Today · sample', icon: Clock3, tone: 'amber' }
+  { label: 'Units offline', value: units.value.filter((unit) => unit.status === 'offline').length, context: 'Not in service', icon: Radio, tone: 'amber' }
 ])
 
 const today = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date())
+
+onMounted(() => {
+  loadOverview()
+  refreshTimer = window.setInterval(loadOverview, 30000)
+})
+
+onUnmounted(() => window.clearInterval(refreshTimer))
+
+async function loadOverview() {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const { data } = await api.get('/command-center/overview')
+    incidents.value = data.incidents
+    units.value = data.resources
+  } catch (error) {
+    loadError.value = error.response?.data?.message || 'Unable to load dispatch data.'
+  } finally {
+    loading.value = false
+  }
+}
+
+function incidentIcon(type) {
+  const normalized = type.toLowerCase()
+  if (normalized.includes('medical')) return HeartPulse
+  if (normalized.includes('fire')) return Flame
+  if (normalized.includes('traffic') || normalized.includes('collision')) return Ambulance
+  return ShieldAlert
+}
+
+function titleCase(value) {
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+function timeAgo(value) {
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60000))
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} hr ago`
+  return `${Math.floor(hours / 24)} day ago`
+}
 </script>
 
 <style scoped>
@@ -329,6 +343,14 @@ h1 {
   height: 7px;
   border-radius: 50%;
   background: #e6a43a;
+}
+
+.sample-label .sample-dot {
+  background: #36a77b;
+}
+
+.sample-label.connection-error .sample-dot {
+  background: #d54a54;
 }
 
 .primary-button,
@@ -487,6 +509,13 @@ h1 {
 .incident-list {
   display: flex;
   flex-direction: column;
+}
+
+.empty-message {
+  margin: 0;
+  padding: 16px 0;
+  color: #8993a4;
+  font-size: 11px;
 }
 
 .incident-row {
@@ -688,6 +717,11 @@ h1 {
   background: #fff6e8;
 }
 
+.unit-offline {
+  color: #7c8492;
+  background: #f0f2f5;
+}
+
 .unit-info {
   flex: 1;
   gap: 3px;
@@ -728,6 +762,10 @@ h1 {
 
 .status-standby > span {
   background: #e0a13b;
+}
+
+.status-offline > span {
+  background: #8791a3;
 }
 
 .secondary-button {
@@ -836,6 +874,25 @@ h1 {
 .demo-note svg {
   flex: 0 0 auto;
   color: #a3acba;
+}
+
+.demo-note a {
+  color: #b8323e;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.demo-note a:hover {
+  text-decoration: underline;
+}
+
+.load-error {
+  margin: -6px 0 15px;
+  border-radius: 7px;
+  padding: 9px 11px;
+  color: #a92735;
+  background: #fff0f1;
+  font-size: 11px;
 }
 
 @media (max-width: 1050px) {
