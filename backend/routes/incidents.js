@@ -1,10 +1,17 @@
 const express = require('express');
 const Incident = require('../models/Incident');
 const Resource = require('../models/Resource');
+const { createIncidentAlert, createResourceAlert } = require('../services/alertService');
 
 const router = express.Router();
 
 function handleError(res, error) {
+    if (error.operationCommitted) {
+        console.error('Incident saved but its alert was not recorded:', error);
+        return res.status(503).json({
+            message: 'The incident was saved, but its alert could not be recorded. Refresh the incident before retrying.'
+        });
+    }
     if (error.name === 'ValidationError' || error.name === 'CastError') {
         return res.status(400).json({ message: error.message });
     }
@@ -35,6 +42,7 @@ router.post('/', async (req, res) => {
             longitude: req.body.longitude,
             priority: req.body.priority
         });
+        await createIncidentAlert(incident);
         return res.status(201).json(incident);
     } catch (error) {
         return handleError(res, error);
@@ -53,22 +61,28 @@ router.get('/:id', async (req, res) => {
 
 router.patch('/:id', async (req, res) => {
     try {
+        const currentIncident = await Incident.findById(req.params.id);
+        if (!currentIncident) return res.status(404).json({ message: 'Incident not found.' });
+
         const updates = {};
         for (const field of ['title', 'type', 'description', 'location', 'latitude', 'longitude', 'priority', 'status']) {
             if (Object.hasOwn(req.body, field)) updates[field] = req.body[field];
         }
 
         const incident = await Incident.findByIdAndUpdate(req.params.id, updates, {
-            new: true,
+            returnDocument: 'after',
             runValidators: true
         });
-        if (!incident) return res.status(404).json({ message: 'Incident not found.' });
-
-        if (incident.status === 'resolved') {
+        if (incident.status === 'resolved' && currentIncident.status !== 'resolved') {
+            const assignedResources = await Resource.find({ assignedIncident: incident._id });
             await Resource.updateMany(
                 { assignedIncident: incident._id },
                 { $set: { status: 'available', assignedIncident: null } }
             );
+            await Promise.all(assignedResources.map((resource) =>
+                createResourceAlert({ ...resource.toObject(), status: 'available' }, 'resource_released')
+            ));
+            await createIncidentAlert(incident, 'incident_resolved');
         }
 
         return res.json(incident);

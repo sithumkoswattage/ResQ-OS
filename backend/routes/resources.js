@@ -1,10 +1,17 @@
 const express = require('express');
 const Incident = require('../models/Incident');
 const Resource = require('../models/Resource');
+const { createResourceAlert } = require('../services/alertService');
 
 const router = express.Router();
 
 function handleError(res, error) {
+    if (error.operationCommitted) {
+        console.error('Resource change completed but its alert was not recorded:', error);
+        return res.status(503).json({
+            message: 'The resource change completed, but its alert could not be recorded. Refresh before retrying.'
+        });
+    }
     if (error.name === 'ValidationError' || error.name === 'CastError') {
         return res.status(400).json({ message: error.message });
     }
@@ -40,6 +47,7 @@ router.post('/', async (req, res) => {
             longitude: req.body.longitude,
             status: req.body.status
         });
+        await createResourceAlert(resource, 'resource_added');
         return res.status(201).json(resource);
     } catch (error) {
         return handleError(res, error);
@@ -54,6 +62,7 @@ router.patch('/:id', async (req, res) => {
             return res.status(409).json({ message: 'Unassign this resource before editing its details.' });
         }
 
+        const previousStatus = resource.status;
         for (const field of ['unitCode', 'name', 'type', 'latitude', 'longitude', 'status']) {
             if (Object.hasOwn(req.body, field)) resource[field] = req.body[field];
         }
@@ -61,6 +70,9 @@ router.patch('/:id', async (req, res) => {
             return res.status(400).json({ message: 'Assign a resource to an incident to mark it dispatched.' });
         }
         await resource.save();
+        if (resource.status !== previousStatus) {
+            await createResourceAlert(resource, 'resource_status_changed');
+        }
         return res.json(resource);
     } catch (error) {
         return handleError(res, error);
@@ -76,6 +88,7 @@ router.patch('/:id/assignment', async (req, res) => {
         }
 
         const incidentId = req.body.incidentId;
+        const previousIncidentId = resource.assignedIncident?.toString() || null;
         if (incidentId === null || incidentId === '') {
             resource.assignedIncident = null;
             resource.status = 'available';
@@ -93,6 +106,15 @@ router.patch('/:id/assignment', async (req, res) => {
         }
 
         await resource.save();
+        const currentIncidentId = resource.assignedIncident?.toString() || null;
+        if (previousIncidentId !== currentIncidentId) {
+            if (currentIncidentId) {
+                const incident = await Incident.findById(currentIncidentId);
+                await createResourceAlert(resource, 'resource_dispatched', incident);
+            } else if (previousIncidentId) {
+                await createResourceAlert(resource, 'resource_released');
+            }
+        }
         await resource.populate('assignedIncident', 'code title status');
         return res.json(resource);
     } catch (error) {
@@ -108,6 +130,7 @@ router.delete('/:id', async (req, res) => {
             return res.status(409).json({ message: 'Unassign this resource before removing it.' });
         }
         await resource.deleteOne();
+        await createResourceAlert(resource, 'resource_removed');
         return res.status(204).end();
     } catch (error) {
         return handleError(res, error);
