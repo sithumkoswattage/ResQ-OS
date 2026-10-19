@@ -51,7 +51,7 @@ router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token') || sessionStorage.getItem('token')
 
   if (to.path.startsWith('/dispatcher') && !token) {
-    next({ name: 'login' })
+    next({ name: 'login', query: { redirect: to.fullPath } })
   } else if (to.path === '/' && token) {
     next({ name: 'dispatcher' })
   } else {
