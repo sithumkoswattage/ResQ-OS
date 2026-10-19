@@ -10,6 +10,9 @@ router.post('/register', async (req, res) => {
         if (!email || !password || !username) {
             return res.status(400).json({ message: "Username, email, and password are required" });
         }
+        if (role && role !== 'responder') {
+            return res.status(403).json({ message: "Public registration is only available for responder accounts. Contact an administrator to provision a dispatcher account." });
+        }
 
         let user = await User.findOne({ $or: [{ email }, { username }] });
         if (user) return res.status(400).json({ message: "User with this email or username already exists" });
@@ -17,7 +20,7 @@ router.post('/register', async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
-        user = new User({ username, email, password: hashedPassword, role: role || 'responder' });
+        user = new User({ username, email, password: hashedPassword, role: 'responder' });
         await user.save();
 
         res.status(201).json({ message: "User registered successfully" });
@@ -42,7 +45,11 @@ router.post('/login', async (req, res) => {
         if (!user) return res.status(400).json({ message: "Invalid credentials" });
 
         const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
+
+        if (!isMatch) {
+            return res.status(400).json({ message: "Invalid credentials" });
+        }
+
 
         // Normalize roles for validation if a specific role was selected
         if (role) {
@@ -54,7 +61,6 @@ router.post('/login', async (req, res) => {
                 });
             }
         }
-
         const token = jwt.sign(
             { id: user._id, role: user.role, username: user.username },
             process.env.JWT_SECRET,
