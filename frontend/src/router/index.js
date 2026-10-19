@@ -8,6 +8,7 @@ import IncidentsView from '../views/IncidentsView.vue'
 import IncidentDetailsView from '../views/IncidentDetailsView.vue'
 import ResourcesView from '../views/ResourcesView.vue'
 import CommandCenterView from '../views/CommandCenterView.vue'
+import AlertsView from '../views/AlertsView.vue'
 
 const routes = [
   {
@@ -43,6 +44,11 @@ const routes = [
         path: 'command-center',
         name: 'command-center',
         component: CommandCenterView
+      },
+      {
+        path: 'alerts',
+        name: 'alerts',
+        component: AlertsView
       }
     ]
   }
