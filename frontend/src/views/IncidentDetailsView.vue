@@ -22,7 +22,6 @@
           <span class="priority-badge" :class="`priority-${incident.priority}`">{{ titleCase(incident.priority) }}</span>
         </div>
       </section>
-
       <div class="details-grid">
         <section class="detail-card">
           <p class="eyebrow">Incident overview</p>

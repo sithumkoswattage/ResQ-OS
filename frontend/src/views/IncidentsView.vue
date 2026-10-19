@@ -13,7 +13,6 @@
     </header>
 
     <p v-if="errorMessage" class="error-message" role="alert">{{ errorMessage }}</p>
-
     <form v-if="formVisible" class="panel incident-form" @submit.prevent="createIncident">
       <div class="panel-heading">
         <div>
