@@ -99,7 +99,7 @@
       </div>
 
       <p v-if="loadError" class="error-message" role="alert">{{ loadError }}</p>
-      <p v-else-if="loading" class="loading-state">Loading resources…</p>
+      <p v-if="loading" class="loading-state">Loading resources…</p>
       <div v-else-if="filteredResources.length" class="resource-list">
         <article v-for="resource in filteredResources" :key="resource._id" class="resource-row">
           <div class="unit-identity">

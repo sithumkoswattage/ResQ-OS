@@ -13,7 +13,6 @@
     </header>
 
     <p v-if="errorMessage" class="error-message" role="alert">{{ errorMessage }}</p>
-
     <section class="summary-grid" aria-label="Command Center summary">
       <article class="summary-card">
         <span class="summary-icon incidents-icon"><Siren :size="18" /></span>
