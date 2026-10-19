@@ -7,15 +7,10 @@ const api = axios.create({
   }
 })
 
-const incidents = [
-  {
-    id: 1042,
-    type: 'Fire',
-    location: 'Colombo',
-    priority: 'Critical',
-    status: 'Active'
-  },
-  // ...
-]
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token') || sessionStorage.getItem('token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
 
 export default api
