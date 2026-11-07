@@ -81,7 +81,7 @@ router.patch('/:id', async (req, res) => {
 
 router.patch('/:id/assignment', async (req, res) => {
     try {
-        const resource = await Resource.findById(req.params.id);
+        let resource = await Resource.findById(req.params.id);
         if (!resource) return res.status(404).json({ message: 'Resource not found.' });
         if (!Object.hasOwn(req.body, 'incidentId')) {
             return res.status(400).json({ message: 'Incident ID is required; use null to release a resource.' });
@@ -89,9 +89,13 @@ router.patch('/:id/assignment', async (req, res) => {
 
         const incidentId = req.body.incidentId;
         const previousIncidentId = resource.assignedIncident?.toString() || null;
-        if (incidentId === null || incidentId === '') {
-            resource.assignedIncident = null;
-            resource.status = 'available';
+        const releasing = incidentId === null || incidentId === '';
+        let update;
+        // Compare-and-set on the assignment we just read, so two dispatchers
+        // cannot both claim the same unit.
+        const guard = { _id: resource._id, assignedIncident: resource.assignedIncident ?? null };
+        if (releasing) {
+            update = { assignedIncident: null, status: 'available' };
         } else {
             if (resource.status === 'offline') {
                 return res.status(409).json({ message: 'An offline resource cannot be dispatched.' });
@@ -101,11 +105,18 @@ router.patch('/:id/assignment', async (req, res) => {
             if (incident.status !== 'active') {
                 return res.status(409).json({ message: 'A resource can only be assigned to an active incident.' });
             }
-            resource.assignedIncident = incident._id;
-            resource.status = 'dispatched';
+            update = { assignedIncident: incident._id, status: 'dispatched' };
+            guard.status = { $ne: 'offline' };
         }
 
-        await resource.save();
+        const updated = await Resource.findOneAndUpdate(guard, { $set: update }, {
+            returnDocument: 'after',
+            runValidators: true
+        });
+        if (!updated) {
+            return res.status(409).json({ message: 'This unit was changed by someone else. Refresh and try again.' });
+        }
+        resource = updated;
         const currentIncidentId = resource.assignedIncident?.toString() || null;
         if (previousIncidentId !== currentIncidentId) {
             if (currentIncidentId) {

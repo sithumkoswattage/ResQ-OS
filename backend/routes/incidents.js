@@ -2,6 +2,7 @@ const express = require('express');
 const Incident = require('../models/Incident');
 const Resource = require('../models/Resource');
 const { createIncidentAlert, createResourceAlert } = require('../services/alertService');
+const { rankByDistance } = require('../services/geo');
 
 const router = express.Router();
 
@@ -54,6 +55,38 @@ router.get('/:id', async (req, res) => {
         const incident = await Incident.findById(req.params.id).lean();
         if (!incident) return res.status(404).json({ message: 'Incident not found.' });
         return res.json(incident);
+    } catch (error) {
+        return handleError(res, error);
+    }
+});
+
+router.get('/:id/nearby-resources', async (req, res) => {
+    try {
+        const incident = await Incident.findById(req.params.id).lean();
+        if (!incident) return res.status(404).json({ message: 'Incident not found.' });
+        if (incident.status !== 'active') {
+            return res.status(409).json({ message: 'Nearby units are only suggested for active incidents.' });
+        }
+
+        const requestedLimit = Number.parseInt(req.query.limit, 10);
+        const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 20) : 5;
+        const filter = { status: 'available' };
+        if (typeof req.query.type === 'string' && req.query.type.trim()) {
+            const escaped = req.query.type.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            filter.type = new RegExp(escaped, 'i');
+        }
+
+        const available = await Resource.find(filter).lean();
+        const resources = rankByDistance(available, incident.latitude, incident.longitude).slice(0, limit);
+        return res.json({
+            incident: {
+                _id: incident._id,
+                code: incident.code,
+                latitude: incident.latitude,
+                longitude: incident.longitude
+            },
+            resources
+        });
     } catch (error) {
         return handleError(res, error);
     }
