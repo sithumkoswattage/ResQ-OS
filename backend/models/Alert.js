@@ -10,6 +10,7 @@ const alertSchema = new mongoose.Schema({
             'resource_dispatched',
             'resource_released',
             'resource_status_changed',
+            'resource_progress',
             'resource_removed'
         ],
         required: true

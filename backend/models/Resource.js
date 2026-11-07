@@ -7,7 +7,11 @@ const resourceSchema = new mongoose.Schema({
     status: { type: String, enum: ['available', 'dispatched', 'offline'], default: 'available' },
     latitude: { type: Number, required: true, min: -90, max: 90 },
     longitude: { type: Number, required: true, min: -180, max: 180 },
-    assignedIncident: { type: mongoose.Schema.Types.ObjectId, ref: 'Incident', default: null }
+    assignedIncident: { type: mongoose.Schema.Types.ObjectId, ref: 'Incident', default: null },
+    // Last position/availability ping from the unit's own device (null = never seen).
+    lastSeen: { type: Date, default: null },
+    // Where the unit is in its current dispatch; null when not dispatched.
+    progress: { type: String, enum: ['assigned', 'accepted', 'on_scene', null], default: null }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Resource', resourceSchema);
