@@ -60,6 +60,11 @@ async function createResourceAlert(resource, type, incident = null) {
             title: 'Resource removed',
             message: `${resource.name} (${resource.unitCode}) was removed from the fleet.`
         },
+        resource_progress: {
+            severity: 'info',
+            title: resource.progress === 'on_scene' ? 'Unit on scene' : 'Dispatch accepted',
+            message: `${resource.name} (${resource.unitCode}) ${resource.progress === 'on_scene' ? 'is on scene' : 'accepted the dispatch'}${incident ? ` for ${incident.code}` : ''}.`
+        },
         resource_status_changed: {
             severity: resource.status === 'offline' ? 'warning' : 'info',
             title: `Resource ${resource.status}`,

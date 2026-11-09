@@ -1,7 +1,10 @@
 const express = require('express');
 const Incident = require('../models/Incident');
 const Resource = require('../models/Resource');
+const User = require('../models/User');
 const { createResourceAlert } = require('../services/alertService');
+const { publishToDispatchers, publishToUnit } = require('../services/events');
+const { isOnline } = require('../services/presence');
 
 const router = express.Router();
 
@@ -28,7 +31,17 @@ router.get('/', async (req, res) => {
             .populate('assignedIncident', 'code title status')
             .sort({ unitCode: 1 })
             .lean();
-        return res.json(resources);
+        const operators = await User.find({ unit: { $ne: null } }).select('username email unit').lean();
+        const operatorByUnit = new Map(operators.map((user) => [String(user.unit), {
+            id: user._id,
+            username: user.username,
+            email: user.email
+        }]));
+        return res.json(resources.map((resource) => ({
+            ...resource,
+            online: isOnline(resource),
+            operator: operatorByUnit.get(String(resource._id)) || null
+        })));
     } catch (error) {
         return handleError(res, error);
     }
@@ -48,6 +61,7 @@ router.post('/', async (req, res) => {
             status: req.body.status
         });
         await createResourceAlert(resource, 'resource_added');
+        publishToDispatchers('unit:status', resource.toObject());
         return res.status(201).json(resource);
     } catch (error) {
         return handleError(res, error);
@@ -73,6 +87,7 @@ router.patch('/:id', async (req, res) => {
         if (resource.status !== previousStatus) {
             await createResourceAlert(resource, 'resource_status_changed');
         }
+        publishToDispatchers('unit:status', { ...resource.toObject(), online: isOnline(resource) });
         return res.json(resource);
     } catch (error) {
         return handleError(res, error);
@@ -81,7 +96,7 @@ router.patch('/:id', async (req, res) => {
 
 router.patch('/:id/assignment', async (req, res) => {
     try {
-        const resource = await Resource.findById(req.params.id);
+        let resource = await Resource.findById(req.params.id);
         if (!resource) return res.status(404).json({ message: 'Resource not found.' });
         if (!Object.hasOwn(req.body, 'incidentId')) {
             return res.status(400).json({ message: 'Incident ID is required; use null to release a resource.' });
@@ -89,9 +104,14 @@ router.patch('/:id/assignment', async (req, res) => {
 
         const incidentId = req.body.incidentId;
         const previousIncidentId = resource.assignedIncident?.toString() || null;
-        if (incidentId === null || incidentId === '') {
-            resource.assignedIncident = null;
-            resource.status = 'available';
+        const releasing = incidentId === null || incidentId === '';
+        let update;
+        let dispatchedIncident = null;
+        // Compare-and-set on the assignment we just read, so two dispatchers
+        // cannot both claim the same unit.
+        const guard = { _id: resource._id, assignedIncident: resource.assignedIncident ?? null };
+        if (releasing) {
+            update = { assignedIncident: null, status: 'available', progress: null };
         } else {
             if (resource.status === 'offline') {
                 return res.status(409).json({ message: 'An offline resource cannot be dispatched.' });
@@ -101,11 +121,19 @@ router.patch('/:id/assignment', async (req, res) => {
             if (incident.status !== 'active') {
                 return res.status(409).json({ message: 'A resource can only be assigned to an active incident.' });
             }
-            resource.assignedIncident = incident._id;
-            resource.status = 'dispatched';
+            update = { assignedIncident: incident._id, status: 'dispatched', progress: 'assigned' };
+            dispatchedIncident = incident;
+            guard.status = { $ne: 'offline' };
         }
 
-        await resource.save();
+        const updated = await Resource.findOneAndUpdate(guard, { $set: update }, {
+            returnDocument: 'after',
+            runValidators: true
+        });
+        if (!updated) {
+            return res.status(409).json({ message: 'This unit was changed by someone else. Refresh and try again.' });
+        }
+        resource = updated;
         const currentIncidentId = resource.assignedIncident?.toString() || null;
         if (previousIncidentId !== currentIncidentId) {
             if (currentIncidentId) {
@@ -115,8 +143,47 @@ router.patch('/:id/assignment', async (req, res) => {
                 await createResourceAlert(resource, 'resource_released');
             }
         }
+        publishToDispatchers('unit:status', { ...resource.toObject(), online: isOnline(resource) });
+        if (dispatchedIncident) {
+            publishToUnit(resource._id, 'dispatch:assigned', {
+                incident: dispatchedIncident.toObject(),
+                progress: 'assigned'
+            });
+        } else if (previousIncidentId) {
+            publishToUnit(resource._id, 'dispatch:released', { incidentId: previousIncidentId });
+        }
         await resource.populate('assignedIncident', 'code title status');
         return res.json(resource);
+    } catch (error) {
+        return handleError(res, error);
+    }
+});
+
+router.put('/:id/operator', async (req, res) => {
+    try {
+        const resource = await Resource.findById(req.params.id);
+        if (!resource) return res.status(404).json({ message: 'Resource not found.' });
+        if (!Object.hasOwn(req.body, 'email')) {
+            return res.status(400).json({ message: 'Email is required; use null to unlink the operator.' });
+        }
+
+        if (req.body.email === null) {
+            await User.updateMany({ unit: resource._id }, { $set: { unit: null } });
+            return res.json({ operator: null });
+        }
+
+        const email = String(req.body.email).trim();
+        const user = await User.findOne({ email, role: 'responder' }).collation({ locale: 'en', strength: 2 });
+        if (!user) return res.status(404).json({ message: 'No responder account with that email.' });
+        if (user.unit && String(user.unit) !== String(resource._id)) {
+            return res.status(409).json({ message: 'That account is already linked to another unit.' });
+        }
+
+        // One operator per unit: unlink anyone else first.
+        await User.updateMany({ unit: resource._id, _id: { $ne: user._id } }, { $set: { unit: null } });
+        user.unit = resource._id;
+        await user.save();
+        return res.json({ operator: { id: user._id, username: user.username, email: user.email } });
     } catch (error) {
         return handleError(res, error);
     }
@@ -130,6 +197,8 @@ router.delete('/:id', async (req, res) => {
             return res.status(409).json({ message: 'Unassign this resource before removing it.' });
         }
         await resource.deleteOne();
+        await User.updateMany({ unit: resource._id }, { $set: { unit: null } });
+        publishToDispatchers('unit:removed', { resourceId: resource._id });
         await createResourceAlert(resource, 'resource_removed');
         return res.status(204).end();
     } catch (error) {

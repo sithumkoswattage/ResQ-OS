@@ -21,3 +21,14 @@ Incidents and resources require latitude and longitude in decimal degrees so the
 ### Load initial sample records
 
 For a local development database, run `npm run seed:initial` from `backend` to populate the dashboard with four initial incidents and five response units. The command is repeatable, preserves existing records, and only connects to a local MongoDB server. It does not create or change dispatcher accounts.
+
+
+## Field units, live updates and routing
+
+- Responder accounts operate one unit each. Create one with `npm run create:responder` (from `backend`), or register one publicly and have a dispatcher link it with `PUT /api/resources/:id/operator`. `DEMO_RESPONDER_PASSWORD=<password> npm run seed:responders` creates a login per seeded unit (local databases only).
+- Units report availability and position through `/api/me/*`; a unit is "online" when it pinged within the last 60 seconds.
+- `GET /api/incidents/:id/nearby-resources` ranks available units for an incident (add `routing=true` for drive-time ranking). Routes use an OSRM-compatible service: set `ROUTING_URL` (the public demo server is for light development only); on failure the API falls back to straight-line estimates.
+- Live updates use Server-Sent Events (`/api/stream`, ticket flow described in `API_CONTRACT.md`).
+- Backend configuration is documented in `backend/.env.example`. The API sends security headers, rate-limits login and registration, and only allows the origins listed in `CORS_ORIGINS`.
+- Run everything with `JWT_SECRET=<random> docker compose up --build` (app on http://localhost:8080). Tests: `npm test` in `backend` (set `TEST_MONGO_URI` to include the database integration tests).
+- API reference: [API_CONTRACT.md](API_CONTRACT.md). Frontend work list: [FRONTEND_TASKS.md](FRONTEND_TASKS.md).
