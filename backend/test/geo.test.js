@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { haversineKm, rankByDistance } = require('./geo');
+const { haversineKm, rankByDistance } = require('../services/geo');
 
 test('distance between identical points is zero', () => {
     assert.equal(haversineKm(6.9271, 79.8612, 6.9271, 79.8612), 0);

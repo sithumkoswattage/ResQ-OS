@@ -1,29 +1,16 @@
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
 require('dotenv').config();
+const mongoose = require('mongoose');
 
-const authRoutes = require('./routes/auth');
-const incidentRoutes = require('./routes/incidents');
-const resourceRoutes = require('./routes/resources');
-const commandCenterRoutes = require('./routes/commandCenter');
-const alertRoutes = require('./routes/alerts');
+const app = require('./app');
 const { ensureCurrentStateAlerts } = require('./services/alertService');
-const { verifyToken, requireRole } = require('./middleware/auth');
-
-const app = express();
-app.use(express.json());
-app.use(cors());
-
-app.use('/api/auth', authRoutes);
-app.use('/api/incidents', verifyToken, requireRole('dispatcher'), incidentRoutes);
-app.use('/api/resources', verifyToken, requireRole('dispatcher'), resourceRoutes);
-app.use('/api/command-center', verifyToken, requireRole('dispatcher'), commandCenterRoutes);
-app.use('/api/alerts', verifyToken, requireRole('dispatcher'), alertRoutes);
-app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'ResQ-OS Backend' }));
 
 const PORT = process.env.PORT || 5000;
+
 async function startServer() {
+    if (!process.env.MONGO_URI) throw new Error('MONGO_URI is missing from the environment.');
+    if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 16) {
+        throw new Error('JWT_SECRET must be set to a random string of at least 16 characters.');
+    }
     await mongoose.connect(process.env.MONGO_URI);
     console.log('MongoDB connected successfully');
     await ensureCurrentStateAlerts();

@@ -1,29 +1,14 @@
-
-# Stage 1: Build the Vue application
-FROM node:20-alpine AS build
-
+FROM node:22-alpine AS build
 WORKDIR /app
-
-# Copy dependency files
 COPY package*.json ./
-
-# Install dependencies
 RUN npm ci
-
-# Copy the frontend source code
 COPY . .
-
-# Build the production application
+# The API is served from the same origin through nginx (see nginx.conf).
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
-# Stage 2: Serve the application using Nginx
-FROM nginx:alpine
-
-# Copy the production build to Nginx
+FROM nginx:1.27-alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
-
-# Expose the HTTP port
 EXPOSE 80
-
-# Start Nginx
-CMD ["nginx", "-g", "daemon off;"]

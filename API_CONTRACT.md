@@ -1,89 +1,98 @@
 # ResQ-OS API Contract
 
-Base URL: `http://localhost:5000/api` (frontend uses `src/services/api.js`, which adds the bearer token).
-All dispatcher endpoints need `Authorization: Bearer <token>` from a `dispatcher` account.
-Errors are `{ "message": "..." }` with status 400 (validation), 404, 409 (conflict) or 5xx.
+Base URL: `/api` (frontend `src/services/api.js` adds the bearer token; dev default `http://localhost:5000/api`).
+Errors are always `{ "message": "...", "code"?: "..." }`.
 
-Status legend: **[live]** implemented on `feature/nearest-unit-dispatch`, **[planned]** agreed shape, not built yet.
+| Status | Meaning |
+|---|---|
+| 400 | Validation problem (show `message`) |
+| **401** | Not signed in / token expired. `code` is `token_missing`, `token_invalid` or `token_expired`. **Clear the token and go to login.** |
+| 403 | Signed in but wrong role |
+| 404 | Not found |
+| 409 | Conflict (someone else changed it, wrong state). Show `message`, refresh data |
+| 429 | Rate limited (login: 20 / 15 min, register: 10 / hour per IP) |
+
+Roles: `dispatcher` (incidents, resources, command-center, alerts) and `responder` (the `/me` field-unit endpoints). Both can use `/route` and `/stream`.
 
 ---
 
-## Incidents
+## Incidents (dispatcher)
 
-### `POST /incidents` [live]
-Body: `title`, `type`, `location`, `latitude`, `longitude` (required); `priority` (`low|medium|high|critical`, default `medium`), `description`.
-Returns the created incident (201), including `_id`, `code`, `status: "active"`.
+| | |
+|---|---|
+| `POST /incidents` | Body: `title, type, location, latitude, longitude` (required), `priority` (`low\|medium\|high\|critical`), `description`. 201 with the incident. |
+| `GET /incidents`, `GET /incidents/:id` | List (newest first) / one. |
+| `PATCH /incidents/:id` | Any of `title, type, description, location, latitude, longitude, priority, status`. `status: "resolved"` releases all assigned units. |
 
-### `GET /incidents` / `GET /incidents/:id` [live]
-List (newest first) or single incident.
+### `GET /incidents/:id/nearby-resources`
+Suggests **available** units for an **active** incident (409 otherwise).
 
-### `PATCH /incidents/:id` [live]
-Any of `title, type, description, location, latitude, longitude, priority, status`.
-Setting `status: "resolved"` releases all assigned units.
-
-### `GET /incidents/:id/nearby-resources` [live]
-Suggests the nearest **available** units for an active incident.
-
-Query: `limit` (1-20, default 5), `type` (optional, case-insensitive substring, e.g. `ambulance`).
+Query: `limit` (1-20, default 5), `type` (substring filter, e.g. `ambulance`), `onlineOnly=true` (drop units that have not pinged recently), `routing=true` (re-rank the closest candidates by estimated drive time; slower, uses the routing service).
 
 ```json
 {
   "incident": { "_id": "...", "code": "INC-...", "latitude": 6.93, "longitude": 79.86 },
   "resources": [
     { "_id": "...", "unitCode": "AMB-01", "name": "Ambulance 1", "type": "Ambulance",
-      "status": "available", "latitude": 6.94, "longitude": 79.85, "distanceKm": 1.42 }
+      "status": "available", "latitude": 6.94, "longitude": 79.85,
+      "online": true, "lastSeen": "2026-11-08T03:10:00.000Z",
+      "distanceKm": 1.42,
+      "durationMin": 6.1, "routeDistanceKm": 2.3, "routeSource": "osrm" }
   ]
 }
 ```
-- Sorted nearest first. `distanceKm` is straight-line distance (will become drive time once routing is added).
-- 409 if the incident is not active; 404 if it does not exist.
+- Order: online units first, then nearest (by `distanceKm`, or by `durationMin` when `routing=true`).
+- `durationMin`, `routeDistanceKm`, `routeSource` appear only with `routing=true`. `routeSource` is `osrm` or `straight-line` (estimate used when the routing service is unavailable, so show it as approximate).
 
 ---
 
-## Resources (units)
+## Resources / units (dispatcher)
 
-### `GET /resources`, `POST /resources`, `PATCH /resources/:id`, `DELETE /resources/:id` [live]
-Unchanged. A dispatched unit cannot be edited or deleted until released.
+| | |
+|---|---|
+| `GET /resources` | Each unit now also has `online` (bool), `lastSeen`, `progress` and `operator` (`{id, username, email}` or `null`). |
+| `POST /resources`, `PATCH /resources/:id`, `DELETE /resources/:id` | Unchanged. Dispatched units cannot be edited or deleted. |
+| `PATCH /resources/:id/assignment` | Dispatch `{ "incidentId": "<id>" }` or release `{ "incidentId": null }`. Returns the unit with `assignedIncident` populated. 409 `"This unit was changed by someone else..."` if another dispatcher got there first. |
+| `PUT /resources/:id/operator` | Link a responder account to this unit: `{ "email": "unit@x.com" }`; unlink with `{ "email": null }`. One operator per unit, one unit per account (409 otherwise). |
 
-### `PATCH /resources/:id/assignment` [live]
-Dispatch or release a unit.
-
-- Dispatch: `{ "incidentId": "<incident _id>" }`
-- Release: `{ "incidentId": null }`
-
-Returns the updated resource with `assignedIncident` populated (`code`, `title`, `status`).
-
-Errors to show to the dispatcher:
-- 409 `"This unit was changed by someone else. Refresh and try again."` another dispatcher got there first; reload the nearby-units list.
-- 409 offline unit, or incident not active.
+`progress` is `null` (not dispatched), `assigned`, `accepted` or `on_scene`.
 
 ---
 
-## Alerts (dispatcher feed) [live]
-`GET /alerts?status=all|read|unread&category=all|incidents|resources&limit=`, `PATCH /alerts/:id/read`, `PATCH /alerts/read-all`.
+## Field unit (responder) — `/me`
+
+A responder account is linked to one unit (by a dispatcher via `PUT /resources/:id/operator`, or by `npm run create:responder`). Until linked, these return 404 `"No unit is linked to this account..."`.
+
+| | |
+|---|---|
+| `GET /me/unit` | `{ unit, assignment, progress }`. `assignment` is the full incident document or `null`. `unit.online` is true if it pinged in the last 60 s. |
+| `PATCH /me/status` | `{ "status": "available" \| "offline" }`. 409 while dispatched. |
+| `POST /me/location` | `{ "latitude": <number>, "longitude": <number> }` (numbers, not strings). Send every ~10-15 s while online. 409 `"Go online before..."` when offline. Returns `{ lastSeen }`. |
+| `PATCH /me/assignment` | `{ "progress": "accepted" \| "on_scene" \| "completed" }`. Order: assigned -> accepted -> on_scene -> completed (accepted may be skipped). `completed` frees the unit (status `available`). Returns `{ unit, assignment, progress }`. Does **not** resolve the incident; a dispatcher does that. |
+| `GET /me/route` | Route from the unit's last position to its incident: `{ source, distanceKm, durationMin, geometry: [[lat,lng],...], from, to, incidentId }`. 404 if no dispatch. |
+
+## Route lookup (any signed-in user)
+`GET /route?fromLat=&fromLng=&toLat=&toLng=` -> `{ source, distanceKm, durationMin, geometry, from, to }`.
+`geometry` is `[[lat, lng], ...]`, ready for a Leaflet polyline. `source: "straight-line"` means the routing service was unavailable (two-point line, rough ETA).
 
 ---
 
-## Planned: field unit side (Phase 2)
+## Live updates (Server-Sent Events)
 
-Responder accounts get linked to one unit (`User.unit -> Resource`). All routes below require role `responder`.
+1. `POST /stream/ticket` (with the bearer token) -> `{ "ticket": "...", "expiresInSeconds": 30 }`
+2. `new EventSource('/api/stream?ticket=' + ticket)` (the ticket is **single-use**).
+3. On `error`, close it, request a **new ticket**, reconnect (the browser's auto-reconnect would reuse the spent ticket and fail).
 
-| Method | Path | Body | Purpose |
-|---|---|---|---|
-| GET | `/me/unit` | - | The responder's unit plus its current assignment (incident details). |
-| PATCH | `/me/status` | `{ "status": "available" \| "offline" }` | Go online/offline. Cannot change while `dispatched`. |
-| POST | `/me/location` | `{ "latitude", "longitude" }` | Position ping (every ~10-15 s while online). Updates `lastSeen`. |
-| PATCH | `/me/assignment` | `{ "progress": "accepted" \| "on_scene" \| "completed" }` | Progress on the current dispatch. |
+Every event's `data` is JSON.
 
-A unit counts as **online** if `status !== "offline"` and `lastSeen` is within the last 60 s.
-
-## Planned: real-time (Phase 3)
-Socket.IO, authenticated with the same JWT. Dispatchers join room `dispatchers`, each unit joins `unit:<resourceId>`.
-
-| Event | To | Payload |
+| Event | Sent to | Payload |
 |---|---|---|
-| `unit:location` | dispatchers | `{ resourceId, latitude, longitude, lastSeen }` |
-| `unit:status` | dispatchers | updated resource |
+| `connected` | the client | `{ role, unitId }` |
 | `incident:created` / `incident:updated` | dispatchers | incident |
-| `dispatch:assigned` | `unit:<id>` | `{ incident, route? }` |
-| `dispatch:released` | `unit:<id>` | `{ incidentId }` |
+| `unit:status` | dispatchers | unit (with `online`) |
+| `unit:location` | dispatchers | `{ resourceId, latitude, longitude, lastSeen, status }` |
+| `unit:removed` | dispatchers | `{ resourceId }` |
+| `dispatch:assigned` | that unit's responder | `{ incident, progress: "assigned" }` |
+| `dispatch:released` | that unit's responder | `{ incidentId }` (released or incident resolved) |
+
+Alerts (`GET /alerts`...) still work as before; new alert type `resource_progress` ("Dispatch accepted" / "Unit on scene").
