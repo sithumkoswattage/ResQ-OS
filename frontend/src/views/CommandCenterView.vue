@@ -69,21 +69,36 @@
                 Priority: {{ titleCase(incident.priority) }}
               </LPopup>
             </LCircleMarker>
+            <LPolyline
+              v-if="selectedRoute"
+              :lat-lngs="selectedRoute.geometry"
+              color="#3976cb"
+              :weight="5"
+              :opacity="0.8"
+              :dash-array="selectedRoute.source === 'straight-line' ? '8 8' : null"
+            />
             <LCircleMarker
               v-for="resource in resources"
               :key="`resource-${resource._id}`"
               :lat-lng="[resource.latitude, resource.longitude]"
-              :radius="7"
+              :radius="resource._id === selectedUnitId ? 10 : 7"
               :color="resourceColor(resource.status)"
               :fill-color="resourceColor(resource.status)"
-              :fill-opacity="0.85"
+              :fill-opacity="isOnline(resource) ? 0.9 : 0.25"
               :weight="2"
+              :dash-array="isOnline(resource) || resource.status === 'offline' ? null : '3 3'"
+              @click="selectUnit(resource)"
             >
               <LPopup>
                 <strong>{{ resource.unitCode }} · {{ resource.name }}</strong><br />
-                {{ resource.type }} · {{ titleCase(resource.status) }}<br />
+                {{ resource.type }} · {{ titleCase(resource.status) }}
+                <template v-if="resource.status === 'dispatched'"> · {{ progressLabel(resource.progress) }}</template><br />
+                {{ isOnline(resource) ? 'Online' : formatLastSeen(resource.lastSeen) }}<br />
                 <span v-if="resource.assignedIncident">
                   Assigned to {{ resource.assignedIncident.code }}
+                  <template v-if="selectedRoute && resource._id === selectedUnitId">
+                    <br />{{ selectedRoute.source === 'straight-line' ? 'Approx. ' : '' }}{{ formatEta(selectedRoute.durationMin) }} · {{ selectedRoute.distanceKm.toFixed(1) }} km
+                  </template>
                 </span>
               </LPopup>
             </LCircleMarker>
@@ -98,7 +113,10 @@
           <span><i class="legend-dot available-dot"></i>Available unit</span>
           <span><i class="legend-dot dispatched-dot"></i>Dispatched unit</span>
           <span><i class="legend-dot offline-dot"></i>Offline unit</span>
+          <span><i class="legend-dot stale-dot"></i>Not reporting</span>
+          <span v-if="selectedRoute"><i class="legend-line"></i>Route to incident</span>
         </div>
+        <p v-if="routeMessage" class="route-message">{{ routeMessage }}</p>
       </section>
 
       <aside class="side-panels">
@@ -137,14 +155,29 @@
             <RouterLink to="/dispatcher/resources" class="text-link">Manage</RouterLink>
           </div>
           <div v-if="resources.length" class="compact-list">
-            <div v-for="resource in resources.slice(0, 6)" :key="resource._id" class="compact-row unit-row">
-              <span class="unit-mark" :class="`unit-${resource.status}`"><Truck :size="16" /></span>
+            <button
+              v-for="resource in sortedResources.slice(0, 8)"
+              :key="resource._id"
+              type="button"
+              class="compact-row unit-row"
+              :class="{ selected: resource._id === selectedUnitId }"
+              @click="selectUnit(resource)"
+            >
+              <span class="unit-mark" :class="`unit-${resource.status}`">
+                <Truck :size="16" />
+                <i class="presence" :class="{ on: isOnline(resource) }"></i>
+              </span>
               <span class="compact-copy">
                 <strong>{{ resource.name }}</strong>
-                <span>{{ resource.unitCode }} · {{ resource.type }}</span>
+                <span>
+                  {{ resource.unitCode }} ·
+                  {{ isOnline(resource) ? 'Online' : formatLastSeen(resource.lastSeen) }}
+                </span>
               </span>
-              <span class="unit-status" :class="`status-${resource.status}`">{{ titleCase(resource.status) }}</span>
-            </div>
+              <span class="unit-status" :class="`status-${resource.status}`">
+                {{ resource.status === 'dispatched' ? progressLabel(resource.progress) : titleCase(resource.status) }}
+              </span>
+            </button>
           </div>
           <p v-else class="empty-message">No units have been added.</p>
         </section>
@@ -171,12 +204,79 @@ import {
   Siren,
   Truck
 } from 'lucide-vue-next'
-import { LCircleMarker, LMap, LPopup, LTileLayer } from '@vue-leaflet/vue-leaflet'
+import { LCircleMarker, LMap, LPolyline, LPopup, LTileLayer } from '@vue-leaflet/vue-leaflet'
 import 'leaflet/dist/leaflet.css'
 import api from '../services/api'
+import { connectStream } from '../services/stream'
+import { formatEta, formatLastSeen, isUnitOnline, progressLabel } from '../services/units'
 
 const incidents = ref([])
 const resources = ref([])
+const now = ref(Date.now())
+const selectedUnitId = ref('')
+const selectedRoute = ref(null)
+const routeMessage = ref('')
+let closeStream
+let clockTimer
+let reloadTimer
+
+function isOnline(resource) {
+  return isUnitOnline(resource, now.value)
+}
+
+const sortedResources = computed(() => {
+  const rank = (r) => (r.status === 'dispatched' ? 0 : isOnline(r) ? 1 : r.status === 'available' ? 2 : 3)
+  return [...resources.value].sort((a, b) => rank(a) - rank(b) || a.unitCode.localeCompare(b.unitCode))
+})
+
+async function selectUnit(resource) {
+  selectedUnitId.value = resource._id
+  selectedRoute.value = null
+  routeMessage.value = ''
+  await loadSelectedRoute()
+}
+
+async function loadSelectedRoute() {
+  const unit = resources.value.find((r) => r._id === selectedUnitId.value)
+  if (!unit) {
+    selectedUnitId.value = ''
+    selectedRoute.value = null
+    return
+  }
+  const incidentId = unit.assignedIncident?._id ?? unit.assignedIncident
+  const incident = incidents.value.find((i) => String(i._id) === String(incidentId))
+  if (!incident) {
+    selectedRoute.value = null
+    routeMessage.value = `${unit.name} is not dispatched to an active incident.`
+    return
+  }
+  try {
+    const { data } = await api.get('/route', {
+      params: {
+        fromLat: unit.latitude,
+        fromLng: unit.longitude,
+        toLat: incident.latitude,
+        toLng: incident.longitude
+      }
+    })
+    if (selectedUnitId.value !== unit._id) return
+    selectedRoute.value = data
+    routeMessage.value = `${unit.name} → ${incident.code}: ${data.source === 'straight-line' ? 'approx. ' : ''}${formatEta(data.durationMin)}, ${data.distanceKm.toFixed(1)} km`
+  } catch {
+    routeMessage.value = 'Route unavailable right now.'
+  }
+}
+
+function scheduleReload() {
+  window.clearTimeout(reloadTimer)
+  reloadTimer = window.setTimeout(() => loadOverview({ quiet: true }), 400)
+}
+
+function applyLocation(update) {
+  resources.value = resources.value.map((r) => String(r._id) === String(update.resourceId)
+    ? { ...r, latitude: update.latitude, longitude: update.longitude, lastSeen: update.lastSeen, status: update.status }
+    : r)
+}
 const mapCenter = computed(() => {
   const points = [...incidents.value, ...resources.value]
   if (!points.length) return [6.9271, 79.8612]
@@ -198,21 +298,35 @@ let refreshTimer
 
 onMounted(() => {
   loadOverview()
-  refreshTimer = window.setInterval(loadOverview, 30000)
+  closeStream = connectStream({
+    'incident:created': scheduleReload,
+    'incident:updated': scheduleReload,
+    'unit:status': scheduleReload,
+    'unit:removed': scheduleReload,
+    'unit:location': applyLocation
+  }, { onReconnect: scheduleReload })
+  // Slow safety net, and a clock so "online" fades to "not reporting".
+  refreshTimer = window.setInterval(() => loadOverview({ quiet: true }), 120000)
+  clockTimer = window.setInterval(() => { now.value = Date.now() }, 15000)
 })
 
 onUnmounted(() => {
+  closeStream?.()
   window.clearInterval(refreshTimer)
+  window.clearInterval(clockTimer)
+  window.clearTimeout(reloadTimer)
 })
 
-async function loadOverview() {
-  loading.value = true
+async function loadOverview({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
   errorMessage.value = ''
   try {
     const { data } = await api.get('/command-center/overview')
     incidents.value = data.incidents
     resources.value = data.resources
     summary.value = data.summary
+    now.value = Date.now()
+    if (selectedUnitId.value) loadSelectedRoute()
     lastUpdated.value = new Intl.DateTimeFormat(undefined, {
       hour: 'numeric',
       minute: '2-digit'
@@ -458,6 +572,39 @@ h1 {
 .available-dot { background: #258564; }
 .dispatched-dot { background: #3976cb; }
 .offline-dot { background: #7c8492; }
+.stale-dot { background: rgb(37 133 100 / 25%); border: 2px dashed #258564; box-sizing: border-box; }
+.legend-line { display: inline-block; width: 18px; height: 0; border-top: 4px solid #3976cb; border-radius: 2px; }
+
+.route-message {
+  margin: 8px 0 0;
+  color: #3976cb;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+button.unit-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.unit-row:hover { background: #f6f8fb; }
+button.unit-row.selected { background: #edf4ff; }
+
+.unit-mark { position: relative; }
+.presence {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #c3c9d3;
+}
+.presence.on { background: #22a06b; }
 
 .side-panels {
   display: flex;

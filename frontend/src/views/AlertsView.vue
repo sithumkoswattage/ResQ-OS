@@ -109,10 +109,12 @@ import {
   Check,
   CheckCheck,
   CircleAlert,
+  Navigation,
   Siren,
   Truck
 } from 'lucide-vue-next'
 import api from '../services/api'
+import { connectStream } from '../services/stream'
 
 const alerts = ref([])
 const unreadCount = ref(0)
@@ -130,18 +132,37 @@ const statusOptions = [
 ]
 
 let refreshTimer
+let reloadTimer
+let closeStream
+
+// Alerts are written alongside incident and unit changes, so those events
+// are our cue to fetch the latest alerts.
+function scheduleReload() {
+  window.clearTimeout(reloadTimer)
+  reloadTimer = window.setTimeout(() => loadAlerts({ quiet: true }), 600)
+}
 
 onMounted(() => {
   loadAlerts()
-  refreshTimer = window.setInterval(loadAlerts, 30000)
+  closeStream = connectStream({
+    'incident:created': scheduleReload,
+    'incident:updated': scheduleReload,
+    'unit:status': scheduleReload,
+    'unit:removed': scheduleReload
+  }, { onReconnect: scheduleReload })
+  refreshTimer = window.setInterval(() => loadAlerts({ quiet: true }), 120000)
 })
 
-onUnmounted(() => window.clearInterval(refreshTimer))
+onUnmounted(() => {
+  closeStream?.()
+  window.clearInterval(refreshTimer)
+  window.clearTimeout(reloadTimer)
+})
 
-watch([statusFilter, categoryFilter], loadAlerts)
+watch([statusFilter, categoryFilter], () => loadAlerts())
 
-async function loadAlerts() {
-  loading.value = true
+async function loadAlerts({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
   errorMessage.value = ''
   try {
     const { data } = await api.get('/alerts', {
@@ -196,6 +217,7 @@ function iconFor(alert) {
   if (alert.sourceType === 'incident') return Siren
   if (alert.type === 'resource_dispatched') return Ambulance
   if (alert.type === 'resource_status_changed') return CircleAlert
+  if (alert.type === 'resource_progress') return Navigation
   return Truck
 }
 

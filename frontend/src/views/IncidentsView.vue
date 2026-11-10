@@ -50,6 +50,35 @@
           Longitude
           <input v-model.number="form.longitude" type="number" min="-180" max="180" step="any" required />
         </label>
+        <div class="full-width map-picker">
+          <span class="map-hint">
+            <MapPin :size="14" aria-hidden="true" />
+            Click the map to place the incident{{ geocoding ? ' · looking up address…' : '' }}
+          </span>
+          <div class="picker-map">
+            <LMap
+              v-model:zoom="pickerZoom"
+              :center="pickerCenter"
+              :use-global-leaflet="false"
+              :options="{ scrollWheelZoom: true }"
+              @click="placeIncident"
+            >
+              <LTileLayer
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution="&copy; OpenStreetMap contributors"
+              />
+              <LCircleMarker
+                v-if="hasFormPoint"
+                :lat-lng="[form.latitude, form.longitude]"
+                :radius="10"
+                color="#c83240"
+                fill-color="#e24a58"
+                :fill-opacity="0.9"
+                :weight="3"
+              />
+            </LMap>
+          </div>
+        </div>
         <label class="full-width">
           Description
           <textarea v-model.trim="form.description" maxlength="2000" rows="3" placeholder="Relevant details for responding units"></textarea>
@@ -108,10 +137,68 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Plus, Siren } from 'lucide-vue-next'
+import { MapPin, Plus, Siren } from 'lucide-vue-next'
+import { LCircleMarker, LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
+import 'leaflet/dist/leaflet.css'
 import api from '../services/api'
+import { connectStream } from '../services/stream'
+
+const pickerZoom = ref(12)
+const pickerCenter = ref([6.9271, 79.8612])
+const geocoding = ref(false)
+// The last address text filled in automatically; we only overwrite the
+// location field if the dispatcher has not edited it since.
+let autoLocation = ''
+let lastGeocodeAt = 0
+let geocodeTimer
+let closeStream
+let fallbackTimer
+
+const hasFormPoint = computed(() =>
+  Number.isFinite(form.latitude) && Number.isFinite(form.longitude) &&
+  Math.abs(form.latitude) <= 90 && Math.abs(form.longitude) <= 180
+)
+
+function placeIncident(event) {
+  if (!event?.latlng) return
+  form.latitude = Number(event.latlng.lat.toFixed(6))
+  form.longitude = Number(event.latlng.lng.toFixed(6))
+  reverseGeocode(form.latitude, form.longitude)
+}
+
+// Nominatim's usage policy allows at most 1 request per second.
+function reverseGeocode(lat, lng) {
+  window.clearTimeout(geocodeTimer)
+  const wait = Math.max(0, 1000 - (Date.now() - lastGeocodeAt))
+  geocodeTimer = window.setTimeout(async () => {
+    if (form.location && form.location !== autoLocation) return
+    lastGeocodeAt = Date.now()
+    geocoding.value = true
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&lat=${lat}&lon=${lng}`
+      const response = await fetch(url, { headers: { 'Accept-Language': 'en' } })
+      if (!response.ok) return
+      const data = await response.json()
+      const address = data.address || {}
+      const parts = [
+        address.road,
+        address.suburb || address.neighbourhood || address.village,
+        address.city || address.town || address.county
+      ].filter(Boolean)
+      const text = (parts.length ? parts.join(', ') : data.display_name || '').slice(0, 240)
+      if (text && (!form.location || form.location === autoLocation)) {
+        form.location = text
+        autoLocation = text
+      }
+    } catch {
+      // Address lookup is a convenience; the dispatcher can type it.
+    } finally {
+      geocoding.value = false
+    }
+  }, wait)
+}
 
 const incidents = ref([])
 const loading = ref(true)
@@ -129,10 +216,30 @@ const form = reactive({
   description: ''
 })
 
-onMounted(loadIncidents)
+onMounted(() => {
+  loadIncidents()
+  closeStream = connectStream({
+    'incident:created': upsertIncident,
+    'incident:updated': upsertIncident
+  }, { onReconnect: () => loadIncidents({ quiet: true }) })
+  fallbackTimer = window.setInterval(() => loadIncidents({ quiet: true }), 120000)
+})
 
-async function loadIncidents() {
-  loading.value = true
+onUnmounted(() => {
+  closeStream?.()
+  window.clearInterval(fallbackTimer)
+  window.clearTimeout(geocodeTimer)
+})
+
+function upsertIncident(incident) {
+  const exists = incidents.value.some((item) => item._id === incident._id)
+  incidents.value = exists
+    ? incidents.value.map((item) => item._id === incident._id ? { ...item, ...incident } : item)
+    : [incident, ...incidents.value]
+}
+
+async function loadIncidents({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
   errorMessage.value = ''
   try {
     const { data } = await api.get('/incidents')
@@ -148,7 +255,9 @@ async function createIncident() {
   saving.value = true
   errorMessage.value = ''
   try {
-    await api.post('/incidents', { ...form })
+    const { data } = await api.post('/incidents', { ...form })
+    upsertIncident(data)
+    autoLocation = ''
     Object.assign(form, {
       title: '',
       type: '',
@@ -159,7 +268,6 @@ async function createIncident() {
       description: ''
     })
     formVisible.value = false
-    await loadIncidents()
   } catch (error) {
     errorMessage.value = error.response?.data?.message || 'Unable to create this incident.'
   } finally {
@@ -326,6 +434,23 @@ input,
 select { height: 37px; padding-top: 0; padding-bottom: 0; }
 textarea { resize: vertical; }
 .full-width { grid-column: 1 / -1; }
+
+.map-picker { display: flex; flex-direction: column; gap: 6px; }
+.map-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #566176;
+  font-size: 11px;
+  font-weight: 650;
+}
+.picker-map {
+  height: 280px;
+  overflow: hidden;
+  border: 1px solid #dfe4ec;
+  border-radius: 8px;
+}
+.picker-map :deep(.leaflet-container) { cursor: crosshair; }
 
 input:focus,
 select:focus,

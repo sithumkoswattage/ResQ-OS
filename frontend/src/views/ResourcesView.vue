@@ -115,10 +115,59 @@
           </div>
 
           <div class="resource-state">
-            <span class="status-badge" :class="`status-${resource.status}`">{{ statusLabel(resource.status) }}</span>
+            <span class="state-badges">
+              <span class="status-badge" :class="`status-${resource.status}`">
+                {{ resource.status === 'dispatched' ? progressLabel(resource.progress) : statusLabel(resource.status) }}
+              </span>
+              <span class="online-badge" :class="{ on: resource.online }" :title="formatLastSeen(resource.lastSeen)">
+                {{ resource.online ? 'Online' : 'Not reporting' }}
+              </span>
+            </span>
             <span v-if="resource.assignedIncident" class="assignment-label">
               {{ resource.assignedIncident.code }} · {{ resource.assignedIncident.title }}
             </span>
+            <span v-else class="assignment-label">{{ formatLastSeen(resource.lastSeen) }}</span>
+          </div>
+
+          <div class="operator-cell">
+            <template v-if="linkingId === resource._id">
+              <form class="operator-form" @submit.prevent="saveOperator(resource)">
+                <input
+                  v-model.trim="operatorEmail"
+                  type="email"
+                  required
+                  placeholder="responder@email.com"
+                  :aria-label="`Operator email for ${resource.name}`"
+                />
+                <button class="secondary-button" type="submit" :disabled="savingOperator">
+                  {{ savingOperator ? 'Linking…' : 'Link' }}
+                </button>
+                <button class="icon-button" type="button" aria-label="Cancel" @click="linkingId = ''">
+                  <X :size="15" />
+                </button>
+              </form>
+            </template>
+            <template v-else-if="resource.operator">
+              <span class="operator-name">
+                <UserRound :size="14" aria-hidden="true" />
+                <span>
+                  <strong>{{ resource.operator.username }}</strong>
+                  <small>{{ resource.operator.email }}</small>
+                </span>
+              </span>
+              <button
+                class="text-button"
+                type="button"
+                :disabled="savingOperator || resource.status === 'dispatched'"
+                :title="resource.status === 'dispatched' ? 'Release the unit before unlinking' : 'Unlink operator'"
+                @click="unlinkOperator(resource)"
+              >
+                Unlink
+              </button>
+            </template>
+            <button v-else class="text-button" type="button" @click="startLinking(resource)">
+              <Link2 :size="14" aria-hidden="true" /> Link operator
+            </button>
           </div>
 
           <div class="assignment-controls">
@@ -176,17 +225,61 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import {
   Ambulance,
+  Link2,
   Pencil,
   Plus,
   Search,
   Trash2,
   Truck,
+  UserRound,
   X
 } from 'lucide-vue-next'
-import api from '../services/api'
+import api, { errorMessage as apiError } from '../services/api'
+import { connectStream } from '../services/stream'
+import { formatLastSeen, progressLabel } from '../services/units'
+
+const linkingId = ref('')
+const operatorEmail = ref('')
+const savingOperator = ref(false)
+let closeStream
+let fallbackTimer
+let reloadTimer
+
+function startLinking(resource) {
+  linkingId.value = resource._id
+  operatorEmail.value = ''
+}
+
+async function setOperator(resource, email) {
+  savingOperator.value = true
+  loadError.value = ''
+  try {
+    await api.put(`/resources/${resource._id}/operator`, { email })
+    linkingId.value = ''
+    await loadData({ quiet: true })
+  } catch (error) {
+    loadError.value = apiError(error, 'Unable to update the unit operator.')
+  } finally {
+    savingOperator.value = false
+  }
+}
+
+function saveOperator(resource) {
+  return setOperator(resource, operatorEmail.value.toLowerCase())
+}
+
+function unlinkOperator(resource) {
+  if (!window.confirm(`Unlink ${resource.operator.username} from ${resource.name}?`)) return
+  return setOperator(resource, null)
+}
+
+function scheduleReload() {
+  window.clearTimeout(reloadTimer)
+  reloadTimer = window.setTimeout(() => loadData({ quiet: true }), 400)
+}
 
 const resources = ref([])
 const incidents = ref([])
@@ -201,6 +294,7 @@ const statusFilter = ref('all')
 const formVisible = ref(false)
 const editingResource = ref(null)
 const assignmentSelections = reactive({})
+const lastAssigned = {}
 
 const emptyForm = () => ({
   unitCode: '',
@@ -221,11 +315,31 @@ const filteredResources = computed(() => resources.value.filter((resource) => {
   return matchesSearch && (statusFilter.value === 'all' || resource.status === statusFilter.value)
 }))
 
-onMounted(loadData)
+onMounted(() => {
+  loadData()
+  closeStream = connectStream({
+    'unit:status': scheduleReload,
+    'unit:removed': scheduleReload,
+    'incident:created': scheduleReload,
+    'incident:updated': scheduleReload,
+    'unit:location': (update) => {
+      resources.value = resources.value.map((r) => String(r._id) === String(update.resourceId)
+        ? { ...r, latitude: update.latitude, longitude: update.longitude, lastSeen: update.lastSeen, online: true }
+        : r)
+    }
+  }, { onReconnect: scheduleReload })
+  fallbackTimer = window.setInterval(() => loadData({ quiet: true }), 120000)
+})
 
-async function loadData() {
-  loading.value = true
-  loadError.value = ''
+onUnmounted(() => {
+  closeStream?.()
+  window.clearInterval(fallbackTimer)
+  window.clearTimeout(reloadTimer)
+})
+
+async function loadData({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) loadError.value = ''
   try {
     const [resourceResponse, incidentResponse] = await Promise.all([
       api.get('/resources'),
@@ -233,8 +347,13 @@ async function loadData() {
     ])
     resources.value = resourceResponse.data
     incidents.value = incidentResponse.data
+    // Keep a dispatcher's unsaved dropdown choice across live refreshes.
     for (const resource of resources.value) {
-      assignmentSelections[resource._id] = resource.assignedIncident?._id || ''
+      const assigned = resource.assignedIncident?._id || ''
+      const untouched = !(resource._id in assignmentSelections) ||
+        assignmentSelections[resource._id] === lastAssigned[resource._id]
+      if (untouched) assignmentSelections[resource._id] = assigned
+      lastAssigned[resource._id] = assigned
     }
   } catch (error) {
     loadError.value = error.response?.data?.message || 'Unable to load resource data. Please try again.'
@@ -310,10 +429,18 @@ async function updateAssignment(resource) {
   try {
     const incidentId = assignmentSelections[resource._id] || null
     const response = await api.patch(`/resources/${resource._id}/assignment`, { incidentId })
-    resources.value = resources.value.map((item) => item._id === resource._id ? response.data : item)
+    const previous = resources.value.find((item) => item._id === resource._id)
+    resources.value = resources.value.map((item) => item._id === resource._id
+      ? { ...response.data, online: previous?.online, operator: previous?.operator }
+      : item)
     assignmentSelections[resource._id] = response.data.assignedIncident?._id || ''
+    lastAssigned[resource._id] = assignmentSelections[resource._id]
   } catch (error) {
     loadError.value = error.response?.data?.message || 'Unable to update the resource assignment.'
+    if (error.response?.status === 409) {
+      delete assignmentSelections[resource._id]
+      await loadData({ quiet: true })
+    }
   } finally {
     updatingAssignment.value = ''
   }
@@ -603,6 +730,61 @@ select:focus {
   justify-content: center;
   border-radius: 10px;
 }
+
+.state-badges { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.online-badge {
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #6b7486;
+  background: #eef1f6;
+  font-size: 10px;
+  font-weight: 700;
+}
+.online-badge.on { color: #1d7c55; background: #e3f6ec; }
+
+.operator-cell {
+  display: flex;
+  flex: 0 1 220px;
+  min-width: 150px;
+  align-items: center;
+  gap: 8px;
+}
+
+.operator-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: #6b7486;
+}
+.operator-name > span { display: flex; min-width: 0; flex-direction: column; }
+.operator-name strong { color: #354057; font-size: 11px; }
+.operator-name small {
+  overflow: hidden;
+  color: #9099aa;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operator-form { display: flex; align-items: center; gap: 5px; width: 100%; }
+.operator-form input { min-width: 0; flex: 1; height: 32px; font-size: 11px; }
+
+.text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 4px 0;
+  color: #b8323e;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.text-button:hover:not(:disabled) { color: #8f202c; }
 
 .tone-available { color: #258564; background: #eaf7f1; }
 .tone-dispatched { color: #3976cb; background: #edf4ff; }

@@ -39,34 +39,146 @@
           <h2>Assigned resources</h2>
           <ul v-if="assignedResources.length" class="assigned-list">
             <li v-for="resource in assignedResources" :key="resource._id">
-              <span><strong>{{ resource.name }}</strong><small>{{ resource.unitCode }} · {{ resource.type }}</small></span>
-              <span class="status-badge status-dispatched">Dispatched</span>
+              <span>
+                <strong>{{ resource.name }}</strong>
+                <small>
+                  {{ resource.unitCode }} · {{ resource.type }}
+                  <template v-if="resource.operator"> · {{ resource.operator.username }}</template>
+                </small>
+              </span>
+              <span class="row-end">
+                <span class="online-dot" :class="{ on: resource.online }" :title="resource.online ? 'Online' : formatLastSeen(resource.lastSeen)"></span>
+                <span class="status-badge" :class="`progress-${resource.progress || 'assigned'}`">{{ progressLabel(resource.progress) }}</span>
+                <button
+                  class="small-button"
+                  type="button"
+                  :disabled="busyId === resource._id"
+                  @click="release(resource)"
+                >
+                  {{ busyId === resource._id ? 'Releasing…' : 'Release' }}
+                </button>
+              </span>
             </li>
           </ul>
           <p v-else class="muted-copy">No resources are assigned to this incident.</p>
           <RouterLink class="manage-link" to="/dispatcher/resources">Manage resource assignments</RouterLink>
         </section>
       </div>
+
+      <section v-if="incident.status === 'active'" class="detail-card nearby-card">
+        <div class="card-heading">
+          <div>
+            <p class="eyebrow">Dispatch</p>
+            <h2>Nearest available units</h2>
+          </div>
+          <div class="nearby-controls">
+            <label class="toggle">
+              <input v-model="onlineOnly" type="checkbox" @change="loadNearby" />
+              Online only
+            </label>
+            <button class="small-button" type="button" :disabled="nearbyLoading" @click="loadNearby">
+              {{ nearbyLoading ? 'Finding…' : 'Refresh' }}
+            </button>
+          </div>
+        </div>
+        <p v-if="nearbyError" class="error-message" role="alert">{{ nearbyError }}</p>
+        <p v-if="nearbyLoading && !nearby.length" class="loading-state">Finding nearby units…</p>
+        <ul v-else-if="nearby.length" class="assigned-list nearby-list">
+          <li v-for="unit in nearby" :key="unit._id">
+            <span>
+              <strong>
+                {{ unit.name }}
+                <span class="online-badge" :class="{ on: unit.online }">{{ unit.online ? 'Online' : 'Not reporting' }}</span>
+              </strong>
+              <small>{{ unit.unitCode }} · {{ unit.type }}</small>
+            </span>
+            <span class="row-end">
+              <span class="distance">
+                <strong>{{ formatKm(unit.routeDistanceKm ?? unit.distanceKm) }}</strong>
+                <small v-if="unit.durationMin != null">
+                  {{ unit.routeSource === 'straight-line' ? 'approx. ' : '' }}{{ formatEta(unit.durationMin) }}
+                </small>
+                <small v-else>straight-line</small>
+              </span>
+              <button
+                class="primary-small"
+                type="button"
+                :disabled="busyId === unit._id"
+                @click="dispatch(unit)"
+              >
+                {{ busyId === unit._id ? 'Dispatching…' : 'Dispatch' }}
+              </button>
+            </span>
+          </li>
+        </ul>
+        <p v-else-if="!nearbyError" class="muted-copy">No available units found. Free up a unit or bring one online.</p>
+      </section>
     </template>
   </section>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import api from '../services/api'
+import api, { errorMessage as apiError } from '../services/api'
+import { connectStream } from '../services/stream'
+import { formatEta, formatLastSeen, progressLabel } from '../services/units'
 
 const route = useRoute()
 const incident = ref(null)
 const resources = ref([])
 const loading = ref(true)
 const errorMessage = ref('')
+const nearby = ref([])
+const nearbyLoading = ref(false)
+const nearbyError = ref('')
+const onlineOnly = ref(false)
+const busyId = ref('')
+let closeStream
+let fallbackTimer
+let refreshTimer
 
 const assignedResources = computed(() =>
-  resources.value.filter((resource) => resource.assignedIncident?._id === incident.value?._id)
+  resources.value.filter((resource) => {
+    const assigned = resource.assignedIncident?._id ?? resource.assignedIncident
+    return String(assigned) === String(incident.value?._id)
+  })
 )
 
-onMounted(loadIncident)
+onMounted(async () => {
+  await loadIncident()
+  closeStream = connectStream({
+    'unit:status': scheduleRefresh,
+    'unit:removed': scheduleRefresh,
+    'incident:updated': (data) => {
+      if (String(data._id) === String(incident.value?._id)) {
+        incident.value = { ...incident.value, ...data }
+        scheduleRefresh()
+      }
+    }
+  }, { onReconnect: refreshAll })
+  fallbackTimer = window.setInterval(refreshAll, 120000)
+})
+
+onUnmounted(() => {
+  closeStream?.()
+  window.clearInterval(fallbackTimer)
+  window.clearTimeout(refreshTimer)
+})
+
+watch(() => route.params.id, (id) => {
+  if (id) loadIncident()
+})
+
+// Several unit events can arrive together; refresh once.
+function scheduleRefresh() {
+  window.clearTimeout(refreshTimer)
+  refreshTimer = window.setTimeout(refreshAll, 400)
+}
+
+async function refreshAll() {
+  await Promise.all([loadResources(), loadNearby()])
+}
 
 async function loadIncident() {
   loading.value = true
@@ -79,10 +191,83 @@ async function loadIncident() {
     incident.value = incidentResponse.data
     resources.value = resourceResponse.data
   } catch (error) {
-    errorMessage.value = error.response?.data?.message || 'Unable to load incident details.'
+    errorMessage.value = apiError(error, 'Unable to load incident details.')
   } finally {
     loading.value = false
   }
+  loadNearby()
+}
+
+async function loadResources() {
+  try {
+    const { data } = await api.get('/resources')
+    resources.value = data
+  } catch {
+    // keep the last list; the error banner is for the initial load
+  }
+}
+
+async function loadNearby() {
+  if (!incident.value || incident.value.status !== 'active') {
+    nearby.value = []
+    return
+  }
+  nearbyLoading.value = true
+  nearbyError.value = ''
+  const params = { limit: 5, routing: true }
+  if (onlineOnly.value) params.onlineOnly = true
+  try {
+    const { data } = await api.get(`/incidents/${incident.value._id}/nearby-resources`, { params, timeout: 8000 })
+    nearby.value = data.resources
+  } catch (error) {
+    if (!error.response || error.code === 'ECONNABORTED') {
+      // Routing can be slow; fall back to straight-line ranking.
+      try {
+        delete params.routing
+        const { data } = await api.get(`/incidents/${incident.value._id}/nearby-resources`, { params })
+        nearby.value = data.resources
+        return
+      } catch (fallbackError) {
+        error = fallbackError
+      }
+    }
+    nearby.value = []
+    nearbyError.value = apiError(error, 'Unable to find nearby units.')
+  } finally {
+    nearbyLoading.value = false
+  }
+}
+
+async function dispatch(unit) {
+  busyId.value = unit._id
+  nearbyError.value = ''
+  try {
+    await api.patch(`/resources/${unit._id}/assignment`, { incidentId: incident.value._id })
+  } catch (error) {
+    nearbyError.value = apiError(error, 'Unable to dispatch this unit.')
+  } finally {
+    busyId.value = ''
+    await refreshAll()
+  }
+}
+
+async function release(resource) {
+  if (!window.confirm(`Release ${resource.name} from this incident?`)) return
+  busyId.value = resource._id
+  errorMessage.value = ''
+  try {
+    await api.patch(`/resources/${resource._id}/assignment`, { incidentId: null })
+  } catch (error) {
+    errorMessage.value = apiError(error, 'Unable to release this unit.')
+  } finally {
+    busyId.value = ''
+    await refreshAll()
+  }
+}
+
+function formatKm(km) {
+  if (km == null) return ''
+  return km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`
 }
 
 function titleCase(value) {
@@ -244,8 +429,71 @@ dd { color: #354057; font-size: 11px; overflow-wrap: anywhere; }
   font-size: 12px;
 }
 
+.row-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.progress-assigned { color: #3976cb; background: #edf4ff; }
+.progress-accepted { color: #8a5a00; background: #fff6e0; }
+.progress-on_scene { color: #258564; background: #eaf7f1; }
+
+.online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c3c9d3;
+}
+.online-dot.on { background: #22a06b; box-shadow: 0 0 0 3px rgb(34 160 107 / 18%); }
+
+.online-badge {
+  margin-left: 6px;
+  border-radius: 999px;
+  padding: 2px 6px;
+  color: #6b7486;
+  background: #eef1f6;
+  font-size: 9px;
+  font-weight: 700;
+}
+.online-badge.on { color: #1d7c55; background: #e3f6ec; }
+
+.small-button,
+.primary-small {
+  min-height: 28px;
+  border-radius: 6px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.small-button { border: 1px solid #dfe4ec; color: #4b5870; background: #fff; }
+.small-button:hover:not(:disabled) { border-color: #c83240; color: #b82b38; }
+.primary-small { border: 0; color: #fff; background: #c83240; }
+.primary-small:hover:not(:disabled) { background: #ab2633; }
+button:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.nearby-card { margin-top: 13px; }
+.card-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.nearby-controls { display: flex; align-items: center; gap: 10px; }
+.toggle { display: flex; align-items: center; gap: 5px; color: #566176; font-size: 11px; }
+.distance { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 70px; }
+.distance strong { color: #354057; font-size: 11px; }
+.distance small { color: #8993a4; font-size: 9px; }
+
 @media (max-width: 650px) {
   .details-grid { grid-template-columns: 1fr; }
+  .assigned-list li { align-items: flex-start; flex-direction: column; }
+  .row-end { justify-content: flex-start; }
 }
 
 @media (max-width: 450px) {
