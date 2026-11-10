@@ -9,7 +9,8 @@
     "seed:initial": "node seedInitialData.js",
     "test": "node --test",
     "seed:responders": "node seedDemoResponders.js",
-    "create:responder": "node createResponder.js"
+    "create:responder": "node createResponder.js",
+    "create:admin": "node createAdmin.js"
   },
   "keywords": [],
   "author": "",

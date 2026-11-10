@@ -54,3 +54,42 @@ test('presence: offline or stale units are not online', () => {
     assert.equal(isOnline({ status: 'offline', lastSeen: new Date(now) }, now), false);
     assert.equal(isOnline({ status: 'available', lastSeen: null }, now), false);
 });
+
+test('admins receive fleet events too, plus admin-only events', () => {
+    const admin = sink();
+    const dispatcher = sink();
+    const removers = [
+        addClient({ res: admin.res, role: 'admin', userId: 'a1', username: 'root' }),
+        addClient({ res: dispatcher.res, role: 'dispatcher', userId: 'd1', username: 'dee' })
+    ];
+    const { publishToAdmins } = require('../services/events');
+
+    publishToDispatchers('incident:created', { id: 1 });
+    publishToAdmins('audit:new', { id: 2 });
+
+    assert.equal(admin.chunks.length, 2);
+    assert.equal(dispatcher.chunks.length, 1, 'dispatchers never see admin-only events');
+    removers.forEach((remove) => remove());
+});
+
+test('onlineUsers groups connections per user; disconnectUser closes them', () => {
+    const { onlineUsers, disconnectUser, connectionsFor } = require('../services/events');
+    const tab1 = sink();
+    const tab2 = sink();
+    let ended = 0;
+    tab1.res.end = () => { ended += 1; };
+    tab2.res.end = () => { ended += 1; };
+    addClient({ res: tab1.res, role: 'dispatcher', userId: 'u1', username: 'dee' });
+    addClient({ res: tab2.res, role: 'dispatcher', userId: 'u1', username: 'dee' });
+
+    const online = onlineUsers();
+    assert.equal(online.length, 1);
+    assert.equal(online[0].connections, 2);
+    assert.equal(connectionsFor('u1'), 2);
+
+    disconnectUser('u1', 'account:suspended', { reason: 'test' });
+    assert.match(tab1.chunks[0], /^event: account:suspended/);
+    assert.equal(ended, 2);
+    assert.equal(connectionsFor('u1'), 0);
+    assert.equal(onlineUsers().length, 0);
+});

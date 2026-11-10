@@ -2,11 +2,11 @@
   <header class="navbar">
 
     <div>
-      <h2>Emergency Command Center</h2>
+      <h2>{{ title }}</h2>
     </div>
 
     <div class="user-info">
-      <span>{{ username || 'Dispatcher' }}</span>
+      <span>{{ username || roleLabel }}</span>
       <button type="button" @click="handleLogout" class="logout-btn">
         Sign Out
       </button>
@@ -22,17 +22,12 @@ import { clearSession } from '../services/session'
 
 const router = useRouter()
 const username = ref('')
+const roleLabel = ref('')
 
 onMounted(() => {
-  const userStr = localStorage.getItem('user') || sessionStorage.getItem('user')
-  if (userStr) {
-    try {
-      const user = JSON.parse(userStr)
-      username.value = user.username || ''
-    } catch {
-      // ignore
-    }
-  }
+  const user = getUser()
+  username.value = user?.username || ''
+  roleLabel.value = user?.role === 'admin' ? 'Administrator' : 'Dispatcher'
 })
 
 const handleLogout = () => {

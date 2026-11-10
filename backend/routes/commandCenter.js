@@ -21,7 +21,8 @@ router.get('/overview', async (req, res) => {
                 activeIncidents: incidents.length,
                 availableResources: resources.filter((resource) => resource.status === 'available').length,
                 dispatchedResources: resources.filter((resource) => resource.status === 'dispatched').length,
-                offlineResources: resources.filter((resource) => resource.status === 'offline').length
+                offlineResources: resources.filter((resource) => resource.status === 'offline').length,
+                suspendedResources: resources.filter((resource) => resource.status === 'suspended').length
             }
         });
     } catch (error) {

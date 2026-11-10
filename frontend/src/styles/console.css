@@ -1,0 +1,88 @@
+/* Shared look for the administrator console (classes are prefixed c-). */
+.c-page { max-width: 1400px; margin: 0 auto; color: #172033; }
+.c-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin: 4px 0 20px; }
+.c-eyebrow { margin: 0 0 5px; color: #929caf; font-size: 10px; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase; }
+.c-title { margin: 0 0 6px; font-size: clamp(25px, 3vw, 32px); letter-spacing: -0.035em; }
+.c-sub { margin: 0; color: #788397; font-size: 13px; }
+.c-card { min-width: 0; border: 1px solid #e9edf3; border-radius: 11px; background: #fff; padding: 16px; box-shadow: 0 3px 12px rgb(19 32 55 / 3%); }
+.c-card h2 { margin: 0; font-size: 15px; letter-spacing: -0.02em; }
+.c-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.c-grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.c-two { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr); align-items: start; gap: 14px; }
+.c-stat strong { display: block; font-size: 26px; line-height: 1.1; }
+.c-stat span { display: block; margin-top: 4px; color: #788397; font-size: 11px; }
+.c-stat .c-stat-label { margin-bottom: 8px; color: #929caf; font-size: 10px; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; }
+
+.c-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.c-toolbar .grow { flex: 1; min-width: 160px; }
+
+.c-btn { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; gap: 6px; border: 1px solid #dfe4ec; border-radius: 8px; padding: 0 12px; background: #fff; color: #354057; font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; }
+.c-btn:hover:not(:disabled) { border-color: #b9c2d0; }
+.c-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+.c-btn.primary { border-color: #c83240; background: #c83240; color: #fff; }
+.c-btn.primary:hover:not(:disabled) { background: #ab2633; }
+.c-btn.danger { border-color: #f1c3c8; color: #b82b38; }
+.c-btn.danger:hover:not(:disabled) { border-color: #c83240; background: #fff0f1; }
+.c-btn.sm { min-height: 28px; padding: 0 9px; font-size: 11px; }
+
+.c-input, .c-select, .c-textarea { min-width: 0; border: 1px solid #dfe4ec; border-radius: 7px; padding: 0 10px; background: #fff; color: #263249; font: inherit; font-size: 12px; }
+.c-input, .c-select { height: 36px; }
+.c-textarea { padding: 8px 10px; resize: vertical; }
+.c-input:focus, .c-select:focus, .c-textarea:focus { outline: 2px solid rgb(200 50 64 / 20%); border-color: #c83240; }
+
+.c-field { display: flex; flex-direction: column; gap: 6px; color: #566176; font-size: 11px; font-weight: 650; }
+.c-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.c-form-grid .full { grid-column: 1 / -1; }
+
+.c-table-wrap { overflow-x: auto; }
+.c-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.c-table th { padding: 8px 10px; border-bottom: 1px solid #e9edf3; color: #929caf; font-size: 10px; font-weight: 750; letter-spacing: 0.06em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+.c-table td { padding: 10px; border-bottom: 1px solid #f0f2f6; vertical-align: middle; }
+.c-table tr:last-child td { border-bottom: 0; }
+.c-table .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.c-table .muted, .c-muted { color: #8993a4; font-size: 11px; }
+.c-table strong { color: #283349; }
+
+.c-badge { display: inline-block; border-radius: 999px; padding: 3px 8px; font-size: 10px; font-weight: 750; white-space: nowrap; }
+.c-badge.ok { color: #258564; background: #eaf7f1; }
+.c-badge.info { color: #376aa9; background: #edf4ff; }
+.c-badge.warn { color: #9a6a12; background: #fff6e1; }
+.c-badge.bad { color: #b82b38; background: #fff0f0; }
+.c-badge.muted { color: #717b8c; background: #f0f2f5; }
+
+.c-dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: #c3cad6; }
+.c-dot.on { background: #2fa37a; box-shadow: 0 0 0 3px rgb(47 163 122 / 18%); }
+
+.c-live { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #dfe4ec; border-radius: 999px; padding: 5px 10px; background: #fff; color: #258564; font-size: 11px; font-weight: 700; }
+.c-live i { width: 8px; height: 8px; border-radius: 50%; background: #2fa37a; animation: c-pulse 1.6s ease-in-out infinite; }
+.c-live.off { color: #9a6a12; }
+.c-live.off i { background: #e0a43a; animation: none; }
+@keyframes c-pulse { 50% { opacity: 0.35; } }
+
+.c-feed { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.c-feed li { display: flex; gap: 10px; border-top: 1px solid #f0f2f6; padding: 10px 0; }
+.c-feed li:first-child { border-top: 0; }
+.c-feed .tone { width: 8px; height: 8px; flex: 0 0 auto; margin-top: 5px; border-radius: 50%; background: #c3cad6; }
+.c-feed .tone.auth { background: #3976cb; }
+.c-feed .tone.incident { background: #c83240; }
+.c-feed .tone.unit, .c-feed .tone.resource { background: #2fa37a; }
+.c-feed .tone.user, .c-feed .tone.equipment { background: #e0a43a; }
+.c-feed .body { min-width: 0; flex: 1; font-size: 12px; color: #354057; }
+.c-feed .body small { display: block; margin-top: 2px; color: #929caf; font-size: 10px; }
+
+.c-error { margin: 0 0 12px; border-radius: 7px; padding: 9px 11px; color: #a92735; background: #fff0f1; font-size: 12px; }
+.c-empty { padding: 26px 10px; color: #8993a4; text-align: center; font-size: 12px; }
+
+.c-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgb(15 23 42 / 55%); }
+.c-modal { width: min(520px, 100%); max-height: 90vh; overflow-y: auto; border-radius: 12px; padding: 20px; background: #fff; box-shadow: 0 24px 60px rgb(0 0 0 / 30%); }
+.c-modal h2 { margin: 0 0 14px; font-size: 17px; }
+.c-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.c-modal p { margin: 0 0 12px; color: #566176; font-size: 12px; line-height: 1.5; }
+
+@media (max-width: 1000px) {
+  .c-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .c-two { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .c-form-grid { grid-template-columns: 1fr; }
+}

@@ -32,3 +32,10 @@ For a local development database, run `npm run seed:initial` from `backend` to p
 - Backend configuration is documented in `backend/.env.example`. The API sends security headers, rate-limits login and registration, and only allows the origins listed in `CORS_ORIGINS`.
 - Run everything with `JWT_SECRET=<random> docker compose up --build` (app on http://localhost:8080). Tests: `npm test` in `backend` (set `TEST_MONGO_URI` to include the database integration tests).
 - API reference: [API_CONTRACT.md](API_CONTRACT.md). Frontend work list: [FRONTEND_TASKS.md](FRONTEND_TASKS.md).
+
+## Administrator account
+
+- Third account type next to dispatcher and field unit. Create the first one with `npm run create:admin` (from `backend`; in Docker: `docker run -it --rm --network host -e MONGO_URI=mongodb://localhost:27017/resqos <backend-image> node createAdmin.js`). Admins can then create dispatcher/field/admin accounts from the console, so `createDispatcher.js` is no longer required.
+- Admin console (`/admin`): live overview (who is online, live activity feed), account management (create, role, suspend/reactivate, password reset), unit management (register, link operators, suspend/reactivate, remove), equipment inventory (assign to units, service dates) and a filterable activity log. Admins can also open the dispatcher pages.
+- Every sign-in, dispatch, change and admin action is written to the audit log. Suspensions take effect immediately: the account is checked on every request and its live streams are closed.
+- The login page no longer has a Dispatcher / Field Unit switch: the account's role decides where you land.

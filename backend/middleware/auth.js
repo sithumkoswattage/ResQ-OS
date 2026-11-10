@@ -23,8 +23,9 @@ const verifyToken = (req, res, next) => {
     }
 };
 
-const requireRole = (role) => (req, res, next) => {
-    if (!req.user || req.user.role !== role) {
+// requireRole('dispatcher') or requireRole('dispatcher', 'admin')
+const requireRole = (...roles) => (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
         return res.status(403).json({ message: 'Access forbidden: Unauthorized role.' });
     }
     return next();

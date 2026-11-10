@@ -1,23 +1,14 @@
 <template>
   <div class="min-h-screen w-full relative overflow-hidden flex items-center justify-center lg:justify-end px-6 py-12 sm:px-12 lg:pr-[10%] text-slate-200">
-    <!-- Background Layer 1: Dispatcher (Command Center) -->
+    <!-- Background -->
     <div
-      class="absolute inset-0 bg-cover bg-center bg-no-repeat transition-all duration-1000 ease-out pointer-events-none transform"
-      :class="role === 'dispatcher' ? 'opacity-100 scale-100' : 'opacity-0 scale-105'"
+      class="absolute inset-0 bg-cover bg-center bg-no-repeat pointer-events-none"
       :style="{ backgroundImage: `url('${loginBg}')` }"
-    ></div>
-
-    <!-- Background Layer 2: Field Unit (Emergency Operations) -->
-    <div
-      class="absolute inset-0 bg-cover bg-center bg-no-repeat transition-all duration-1000 ease-out pointer-events-none transform"
-      :class="role === 'responder' ? 'opacity-100 scale-100' : 'opacity-0 scale-105'"
-      :style="{ backgroundImage: `url('${fieldBg}')` }"
     ></div>
 
     <!-- Dynamic Atmospheric Vignette & Tone Shifting -->
     <div
-      class="absolute inset-0 transition-colors duration-1000 pointer-events-none"
-      :class="role === 'dispatcher' ? 'bg-[#0d1322]/35' : 'bg-[#1a0709]/45'"
+      class="absolute inset-0 bg-[#0d1322]/35 pointer-events-none"
     ></div>
     <div class="absolute inset-0 bg-linear-to-t from-black/80 via-transparent to-black/40 pointer-events-none"></div>
 
@@ -27,10 +18,7 @@
       <!-- Logo -->
       <div class="flex items-center gap-3 mb-7 px-2">
         <div
-          class="w-14 h-14 rounded-xl flex items-center justify-center shadow-lg transition-all duration-500"
-          :class="role === 'dispatcher'
-            ? 'bg-linear-to-br from-rose-600 to-orange-600 shadow-rose-900/40'
-            : 'bg-linear-to-br from-amber-600 to-rose-600 shadow-amber-900/40'"
+          class="w-14 h-14 rounded-xl flex items-center justify-center shadow-lg bg-linear-to-br from-rose-600 to-orange-600 shadow-rose-900/40"
         >
           <svg class="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
@@ -40,7 +28,7 @@
 
         <div>
           <h2 class="text-3xl font-extrabold tracking-tight text-white leading-none">
-            ResQ<span class="transition-colors duration-500" :class="role === 'dispatcher' ? 'text-rose-600' : 'text-amber-500'">-OS</span>
+            ResQ<span class="text-rose-600">-OS</span>
           </h2>
           <p class="mt-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
             Emergency Response & Resource Dispatch Platform
@@ -57,51 +45,11 @@
 
         <h2 class="text-3xl font-bold tracking-tight text-white">Sign in to ResQ-OS</h2>
         <div class="mt-2 text-sm text-slate-300 flex items-center gap-2">
-          <span
-            class="inline-block w-2 h-2 rounded-full animate-ping"
-            :class="role === 'dispatcher' ? 'bg-emerald-400' : 'bg-amber-400'"
-          ></span>
-          <span class="font-medium">
-            {{ role === 'dispatcher' ? 'Access Emergency Command Center' : 'Access Tactical Mobile Field Operations' }}
-          </span>
+          <span class="inline-block w-2 h-2 rounded-full animate-ping bg-emerald-400"></span>
+          <span class="font-medium">Secure access for dispatch, field and administration teams</span>
         </div>
 
         <form class="mt-5 space-y-4" @submit.prevent="handleLogin">
-          <!-- Fluid Segmented Role Tabs -->
-          <div class="relative rounded-2xl border border-white/12 bg-black/40 backdrop-blur-md p-1.5 overflow-hidden">
-            <!-- Animated sliding pill indicator -->
-            <div
-              class="absolute top-1.5 bottom-1.5 rounded-xl transition-all duration-300 ease-out shadow-lg"
-              :class="role === 'dispatcher'
-                ? 'left-1.5 w-[calc(50%-6px)] bg-linear-to-r from-rose-600 to-orange-600 shadow-rose-950/60 border border-white/20'
-                : 'left-[calc(50%+3px)] w-[calc(50%-9px)] bg-linear-to-r from-amber-600 to-rose-600 shadow-amber-950/60 border border-white/20'"
-            ></div>
-
-            <div class="relative z-10 flex">
-              <button
-                v-for="r in roles"
-                :key="r.value"
-                type="button"
-                @click="setRole(r.value)"
-                class="flex-1 flex items-center justify-center gap-2.5 py-2.5 text-sm font-semibold transition-all duration-200 cursor-pointer select-none rounded-xl"
-                :class="role === r.value ? 'text-white font-bold' : 'text-slate-400 hover:text-slate-200'"
-              >
-                <svg
-                  class="w-5 h-5 transition-transform duration-300"
-                  :class="role === r.value ? 'scale-110 drop-shadow' : 'scale-95 opacity-70'"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  v-html="r.icon"
-                ></svg>
-                <span>{{ r.label }}</span>
-              </button>
-            </div>
-          </div>
-
           <!-- Operator ID -->
           <div class="relative">
             <input
@@ -167,7 +115,15 @@
           </div>
 
           <div
-            v-if="route.query.redirect"
+            v-if="sessionNotice"
+            class="rounded-xl border border-amber-500/30 bg-amber-950/30 px-4 py-3 text-sm text-amber-100"
+            role="status"
+          >
+            {{ sessionNotice }}
+          </div>
+
+          <div
+            v-else-if="route.query.redirect"
             class="rounded-xl border border-sky-500/30 bg-sky-950/30 px-4 py-3 text-sm text-sky-100"
             role="status"
           >
@@ -209,12 +165,9 @@
           <button
             type="submit"
             :disabled="isSubmitting"
-            class="w-full h-14.5 rounded-xl text-base font-bold text-white flex items-center justify-center gap-3 shadow-lg transition-all duration-300 hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
-            :class="role === 'dispatcher'
-              ? 'bg-linear-to-r from-rose-600 to-orange-600 shadow-rose-900/35 hover:shadow-rose-600/30'
-              : 'bg-linear-to-r from-amber-600 to-rose-600 shadow-amber-900/35 hover:shadow-amber-600/30'"
+            class="w-full h-14.5 rounded-xl text-base font-bold text-white flex items-center justify-center gap-3 shadow-lg transition-all duration-300 hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed bg-linear-to-r from-rose-600 to-orange-600 shadow-rose-900/35 hover:shadow-rose-600/30"
           >
-            <span>{{ isSubmitting ? 'Authenticating...' : (role === 'dispatcher' ? 'Sign in to Command Center' : 'Sign in to Field Operations') }}</span>
+            <span>{{ isSubmitting ? 'Authenticating...' : 'Sign in' }}</span>
             <svg v-if="!isSubmitting" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M5 12h14" />
               <path d="m12 5 7 7-7 7" />
@@ -231,7 +184,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import loginBg from '../assets/login-bg.jpg'
 import fieldBg from '../assets/field-bg.jpg'
@@ -248,23 +201,11 @@ const showPassword = ref(false)
 const isSubmitting = ref(false)
 const errorMessage = ref('')
 
-const setRole = (newRole) => {
-  role.value = newRole
-  errorMessage.value = ''
-}
-
-const roles = [
-  {
-    value: 'dispatcher',
-    label: 'Dispatcher',
-    icon: '<path d="M4 4h16v12H4z"/><path d="M8 20h8"/><path d="M12 16v4"/>'
-  },
-  {
-    value: 'responder',
-    label: 'Field Unit',
-    icon: '<path d="M5 11h14v8H5z"/><path d="M7 11V7h10v4"/><circle cx="8" cy="19" r="1.5"/><circle cx="16" cy="19" r="1.5"/>'
-  }
-]
+// Shown after the app signed you out (expired session or suspended account).
+const sessionNotice = computed(() => ({
+  expired: 'Your session expired. Please sign in again.',
+  suspended: 'This account has been suspended. Please contact an administrator.'
+}[route.query.reason] || ''))
 
 const handleLogin = async () => {
   errorMessage.value = ''

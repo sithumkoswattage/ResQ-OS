@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import LoginView from '../views/LoginView.vue'
 import DispatcherLayout from '../layouts/DispatcherLayout.vue'
+import AdminLayout from '../layouts/AdminLayout.vue'
 import DashboardView from '../views/DispatcherDashboardView.vue'
 import IncidentsView from '../views/IncidentsView.vue'
 import IncidentDetailsView from '../views/IncidentDetailsView.vue'

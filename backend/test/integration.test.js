@@ -73,6 +73,57 @@ test('API integration', { skip }, async (t) => {
         assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
     });
 
+    await t.test('admin: manage users, suspend accounts and units, equipment, audit trail', async () => {
+        await User.create({ username: 'root', email: 'root@test.local', password: hashed, role: 'admin' });
+        const admin = await login('root', password);
+        assert.equal((await call('GET', '/admin/overview', { token: dispatcher })).status, 403, 'dispatchers are not admins');
+        assert.equal((await call('GET', '/admin/overview', { token: admin })).status, 200);
+
+        // create + suspend a dispatcher: the existing token stops working immediately
+        const created = await call('POST', '/admin/users', { token: admin, body: { username: 'temp', email: 'temp@test.local', password, role: 'dispatcher' } });
+        assert.equal(created.status, 201);
+        const tempToken = await login('temp', password);
+        assert.equal((await call('GET', '/incidents', { token: tempToken })).status, 200);
+        assert.equal((await call('POST', `/admin/users/${created.data._id}/suspend`, { token: admin, body: { reason: 'test' } })).status, 200);
+        const blocked = await call('GET', '/incidents', { token: tempToken });
+        assert.equal(blocked.status, 403);
+        assert.equal(blocked.data.code, 'account_suspended');
+        assert.equal((await call('POST', '/auth/login', { body: { identifier: 'temp', password } })).status, 403);
+        assert.equal((await call('POST', `/admin/users/${created.data._id}/reactivate`, { token: admin })).status, 200);
+
+        // safety rails
+        const self = (await call('GET', '/admin/users', { token: admin })).data.find((u) => u.username === 'root');
+        assert.equal((await call('POST', `/admin/users/${self._id}/suspend`, { token: admin })).status, 409, 'cannot suspend yourself');
+
+        // unit suspension: needs force when dispatched, then blocks dispatching
+        const unit = await makeUnit('SUSP-1', 6.93, 79.85);
+        const incident = await makeIncident('Suspension');
+        await call('PATCH', `/resources/${unit._id}/assignment`, { token: dispatcher, body: { incidentId: incident._id } });
+        const needsForce = await call('POST', `/admin/units/${unit._id}/suspend`, { token: admin, body: {} });
+        assert.equal(needsForce.status, 409);
+        assert.equal(needsForce.data.code, 'unit_dispatched');
+        assert.equal((await call('POST', `/admin/units/${unit._id}/suspend`, { token: admin, body: { force: true, reason: 'faulty' } })).status, 200);
+        assert.equal((await call('PATCH', `/resources/${unit._id}/assignment`, { token: dispatcher, body: { incidentId: incident._id } })).status, 409);
+        assert.equal((await call('PATCH', `/resources/${unit._id}`, { token: dispatcher, body: { status: 'available' } })).status, 409, 'dispatchers cannot lift a suspension');
+        assert.equal((await call('POST', `/admin/units/${unit._id}/reactivate`, { token: admin })).status, 200);
+
+        // equipment: only admins write; dispatchers can read
+        const gear = await call('POST', '/equipment', { token: admin, body: { assetTag: 'defib-01', name: 'Defibrillator', category: 'medical' } });
+        assert.equal(gear.status, 201);
+        assert.equal(gear.data.assetTag, 'DEFIB-01');
+        assert.equal((await call('POST', '/equipment', { token: dispatcher, body: { assetTag: 'X', name: 'X' } })).status, 403);
+        assert.equal((await call('GET', '/equipment', { token: dispatcher })).status, 200);
+        assert.equal((await call('POST', `/equipment/${gear.data._id}/assign`, { token: admin, body: { unitId: unit._id } })).status, 200);
+        assert.equal((await call('PATCH', `/equipment/${gear.data._id}`, { token: admin, body: { status: 'maintenance' } })).data.assignedUnit, null, 'out-of-service gear is unassigned');
+
+        // audit trail records all of it
+        const trail = await call('GET', '/admin/audit?limit=100', { token: admin });
+        const actions = trail.data.entries.map((e) => e.action);
+        for (const expected of ['auth.login', 'user.created', 'user.suspended', 'unit.suspended', 'equipment.created']) {
+            assert.ok(actions.includes(expected), `missing audit action ${expected}`);
+        }
+    });
+
     await t.test('responder flow: link, go online, ping, dispatch, progress, complete', async () => {
         const unit = await makeUnit('FLOW-1', 6.93, 79.85);
         assert.equal((await call('GET', '/me/unit', { token: responder })).status, 404, 'not linked yet');

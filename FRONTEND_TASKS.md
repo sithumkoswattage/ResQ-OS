@@ -2,6 +2,8 @@
 
 The backend for everything below is **done** and described in [`API_CONTRACT.md`](API_CONTRACT.md). Read that first. Everything in this file is frontend work; you shouldn't need to touch `backend/`. If an endpoint doesn't behave as the contract says, tell Sithum.
 
+> **Update:** the login role switch is gone, `api.js` now handles 401/suspension, `services/stream.js` (live updates) exists, and the admin console (`/admin`, `src/views/admin/`) is built. Section 1's quick fixes are done except routing responders to the field app. New API for the admin side is in `API_CONTRACT.md`.
+
 ## 0. Get running
 
 ```bash

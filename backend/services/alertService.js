@@ -66,7 +66,7 @@ async function createResourceAlert(resource, type, incident = null) {
             message: `${resource.name} (${resource.unitCode}) ${resource.progress === 'on_scene' ? 'is on scene' : 'accepted the dispatch'}${incident ? ` for ${incident.code}` : ''}.`
         },
         resource_status_changed: {
-            severity: resource.status === 'offline' ? 'warning' : 'info',
+            severity: ['offline', 'suspended'].includes(resource.status) ? 'warning' : 'info',
             title: `Resource ${resource.status}`,
             message: `${resource.name} (${resource.unitCode}) is now ${resource.status}.`
         }
