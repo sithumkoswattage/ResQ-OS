@@ -140,34 +140,34 @@
                   :aria-label="`Operator email for ${resource.name}`"
                 />
                 <button class="secondary-button" type="submit" :disabled="savingOperator">
-                  {{ savingOperator ? 'Linking…' : 'Link' }}
+                  {{ savingOperator ? 'Adding…' : 'Add' }}
                 </button>
                 <button class="icon-button" type="button" aria-label="Cancel" @click="linkingId = ''">
                   <X :size="15" />
                 </button>
               </form>
             </template>
-            <template v-else-if="resource.operator">
-              <span class="operator-name">
+            <template v-else>
+              <span v-for="member in resource.crew" :key="member.id" class="operator-name">
                 <UserRound :size="14" aria-hidden="true" />
                 <span>
-                  <strong>{{ resource.operator.username }}</strong>
-                  <small>{{ resource.operator.email }}</small>
+                  <strong>{{ member.username }}</strong>
+                  <small>{{ member.onDuty ? 'On duty' : 'Off duty' }}</small>
                 </span>
+                <button
+                  class="text-button"
+                  type="button"
+                  :disabled="savingOperator"
+                  :title="`Remove ${member.username} from this unit`"
+                  @click="removeCrewMember(resource, member)"
+                >
+                  Remove
+                </button>
               </span>
-              <button
-                class="text-button"
-                type="button"
-                :disabled="savingOperator || resource.status === 'dispatched'"
-                :title="resource.status === 'dispatched' ? 'Release the unit before unlinking' : 'Unlink operator'"
-                @click="unlinkOperator(resource)"
-              >
-                Unlink
+              <button class="text-button" type="button" @click="startLinking(resource)">
+                <Link2 :size="14" aria-hidden="true" /> {{ resource.crew?.length ? 'Add person' : 'Link operator' }}
               </button>
             </template>
-            <button v-else class="text-button" type="button" @click="startLinking(resource)">
-              <Link2 :size="14" aria-hidden="true" /> Link operator
-            </button>
           </div>
 
           <div class="assignment-controls">
@@ -271,9 +271,18 @@ function saveOperator(resource) {
   return setOperator(resource, operatorEmail.value.toLowerCase())
 }
 
-function unlinkOperator(resource) {
-  if (!window.confirm(`Unlink ${resource.operator.username} from ${resource.name}?`)) return
-  return setOperator(resource, null)
+async function removeCrewMember(resource, member) {
+  if (!window.confirm(`Remove ${member.username} from ${resource.name}?`)) return
+  savingOperator.value = true
+  loadError.value = ''
+  try {
+    await api.delete(`/resources/${resource._id}/crew/${member.id}`)
+    await loadData({ quiet: true })
+  } catch (error) {
+    loadError.value = apiError(error, 'Unable to remove this person.')
+  } finally {
+    savingOperator.value = false
+  }
 }
 
 function scheduleReload() {
@@ -747,8 +756,9 @@ select:focus {
   display: flex;
   flex: 0 1 220px;
   min-width: 150px;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
 }
 
 .operator-name {

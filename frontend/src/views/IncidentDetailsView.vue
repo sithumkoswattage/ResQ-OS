@@ -43,7 +43,7 @@
                 <strong>{{ resource.name }}</strong>
                 <small>
                   {{ resource.unitCode }} · {{ resource.type }}
-                  <template v-if="resource.operator"> · {{ resource.operator.username }}</template>
+                  <template v-if="resource.crew?.length"> · {{ resource.crew.filter((m) => m.onDuty).map((m) => m.username).join(', ') || 'nobody on duty' }}</template>
                 </small>
               </span>
               <span class="row-end">
