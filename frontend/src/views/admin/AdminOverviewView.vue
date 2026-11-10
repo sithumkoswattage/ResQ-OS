@@ -28,9 +28,9 @@
         <span>{{ overview.incidents.last24h }} reported in the last 24 h</span>
       </article>
       <article class="c-card c-stat">
-        <div class="c-stat-label">Equipment</div>
-        <strong>{{ overview.equipment.total }}</strong>
-        <span>{{ overview.equipment.unassigned }} unassigned · {{ overview.equipment.serviceOverdue }} service overdue</span>
+        <div class="c-stat-label">Staffing</div>
+        <strong>{{ overview.units.withoutOperator }}</strong>
+        <span>units without a crew · {{ overview.units.operatorsWithoutUnit }} field accounts without a unit</span>
       </article>
     </div>
 

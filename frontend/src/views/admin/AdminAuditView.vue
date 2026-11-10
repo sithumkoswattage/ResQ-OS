@@ -67,8 +67,7 @@ const categories = [
   { value: 'incident', label: 'Incidents' },
   { value: 'resource', label: 'Dispatch & fleet' },
   { value: 'unit', label: 'Field unit actions' },
-  { value: 'user', label: 'Account management' },
-  { value: 'equipment', label: 'Equipment' }
+  { value: 'user', label: 'Account management' }
 ]
 
 const route = useRoute()
@@ -88,7 +87,7 @@ let clock
 
 const actionTone = (action = '') => ({
   auth: action.includes('failed') || action.includes('blocked') ? 'bad' : 'info',
-  incident: 'bad', resource: 'ok', unit: 'ok', user: 'warn', equipment: 'warn'
+  incident: 'bad', resource: 'ok', unit: 'ok', user: 'warn'
 }[action.split('.')[0]] || 'muted')
 
 function query(extra = {}) {
