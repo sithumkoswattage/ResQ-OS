@@ -46,26 +46,39 @@
               <i class="status-dot" :class="statusTone"></i>
               {{ statusText }}
             </strong>
-            <small v-if="isDispatched">You can go offline after this dispatch is complete.</small>
-            <small v-else-if="unit.status !== 'offline'">{{ lastSentText }}</small>
-            <small v-else>Go online to receive dispatches.</small>
+            <small v-if="isDispatched && onDuty && !othersOnDuty">You can go off duty after this dispatch is complete.</small>
+            <small v-else-if="isDispatched && !onDuty">Your crew is on a dispatch. Go on duty to join it.</small>
+            <small v-else-if="onDuty">{{ lastSentText }}</small>
+            <small v-else>Go on duty to receive dispatches.</small>
           </div>
           <button
             class="switch"
-            :class="{ on: unit.status !== 'offline' }"
+            :class="{ on: onDuty }"
             type="button"
             role="switch"
-            :aria-checked="unit.status !== 'offline'"
-            :disabled="isDispatched || statusBusy"
+            :aria-checked="onDuty"
+            :disabled="statusBusy || (isDispatched && onDuty && !othersOnDuty)"
             @click="toggleOnline"
           >
             <span class="knob"></span>
-            <span class="sr-only">Online</span>
+            <span class="sr-only">On duty</span>
           </button>
         </section>
 
+        <!-- Crew -->
+        <section v-if="crew.length > 1" class="card crew-card">
+          <span class="eyebrow">Crew on {{ unit.unitCode }}</span>
+          <ul>
+            <li v-for="member in crew" :key="member.id">
+              <i class="status-dot" :class="member.onDuty ? 'tone-online' : 'tone-offline'"></i>
+              {{ member.username }}<template v-if="String(member.id) === String(myId)"> (you)</template>
+              <small>{{ member.onDuty ? 'on duty' : 'off duty' }}</small>
+            </li>
+          </ul>
+        </section>
+
         <!-- Location -->
-        <section v-if="unit.status !== 'offline'" class="card location-card" :class="`geo-${geoState}`">
+        <section v-if="onDuty" class="card location-card" :class="`geo-${geoState}`">
           <MapPin :size="18" aria-hidden="true" />
           <div>
             <strong>{{ geoTitle }}</strong>
@@ -129,7 +142,7 @@
           </a>
         </section>
 
-        <section v-else-if="unit.status !== 'offline'" class="card idle-card">
+        <section v-else-if="onDuty" class="card idle-card">
           <Radio :size="26" aria-hidden="true" />
           <h2>Standing by</h2>
           <p>You'll be alerted here when a dispatcher assigns you to an incident.</p>
@@ -203,7 +216,7 @@ import { LCircleMarker, LMap, LPolyline, LTileLayer } from '@vue-leaflet/vue-lea
 import 'leaflet/dist/leaflet.css'
 import api, { errorMessage as apiError } from '../services/api'
 import { connectStream } from '../services/stream'
-import { clearSession } from '../services/session'
+import { clearSession, getUser } from '../services/session'
 import { formatEta, progressLabel } from '../services/units'
 
 const LOCATION_INTERVAL_MS = 10000
@@ -215,6 +228,10 @@ const loading = ref(true)
 const notLinked = ref(false)
 const errorMessage = ref('')
 const unit = ref(null)
+// Crew: several people can share one unit and each goes on or off duty on their own.
+const crew = ref([])
+const onDuty = ref(false)
+const myId = getUser()?.id
 const assignment = ref(null)
 const progress = ref(null)
 const route = ref(null)
@@ -252,14 +269,15 @@ const NEXT = {
 }
 
 const isDispatched = computed(() => unit.value?.status === 'dispatched')
+const othersOnDuty = computed(() => crew.value.some((m) => m.onDuty && String(m.id) !== String(myId)))
 const nextStep = computed(() => (assignment.value ? NEXT[progress.value || 'assigned'] : null))
 
 const statusText = computed(() => {
   if (!unit.value) return ''
-  if (isDispatched.value) return 'Dispatched'
-  return unit.value.status === 'offline' ? 'Offline' : 'Online · available'
+  if (isDispatched.value) return onDuty.value ? 'Dispatched' : 'Dispatched · you are off duty'
+  return onDuty.value ? 'On duty · available' : 'Off duty'
 })
-const statusTone = computed(() => (isDispatched.value ? 'tone-dispatched' : unit.value?.status === 'offline' ? 'tone-offline' : 'tone-online'))
+const statusTone = computed(() => (isDispatched.value ? 'tone-dispatched' : onDuty.value ? 'tone-online' : 'tone-offline'))
 
 const lastSentText = computed(() => {
   if (!lastSentAt.value) return 'Waiting to share your location…'
@@ -326,6 +344,8 @@ async function loadUnit() {
 
 function applyUnitState(data) {
   unit.value = data.unit
+  if (data.crew) crew.value = data.crew
+  if (data.onDuty !== undefined) onDuty.value = data.onDuty
   const hadAssignment = assignment.value?._id
   assignment.value = data.assignment
   progress.value = data.progress
@@ -335,7 +355,7 @@ function applyUnitState(data) {
   } else if (data.assignment._id !== hadAssignment) {
     loadRoute()
   }
-  if (data.unit.status !== 'offline') startLocation()
+  if (onDuty.value && data.unit.status !== 'suspended') startLocation()
   else stopLocation()
 }
 
@@ -354,14 +374,16 @@ async function loadRoute() {
 // ---------- Availability ----------
 
 async function toggleOnline() {
-  if (!unit.value || isDispatched.value) return
+  if (!unit.value || (isDispatched.value && onDuty.value && !othersOnDuty.value)) return
   unlockAudio()
-  const status = unit.value.status === 'offline' ? 'available' : 'offline'
+  const status = onDuty.value ? 'offline' : 'available'
   statusBusy.value = true
   errorMessage.value = ''
   try {
     const { data } = await api.patch('/me/status', { status })
     unit.value = data.unit
+    if (data.crew) crew.value = data.crew
+    onDuty.value = status === 'available'
     if (status === 'available') {
       lastSentAt.value = null
       startLocation()
@@ -420,7 +442,7 @@ function onPositionError(err) {
 }
 
 async function sendLocation() {
-  if (sending || !position.value || unit.value?.status === 'offline') return
+  if (sending || !position.value || !onDuty.value) return
   sending = true
   const latitude = Number(position.value.latitude)
   const longitude = Number(position.value.longitude)
@@ -697,6 +719,9 @@ onUnmounted(() => {
 
 .status-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .status-card small { display: block; margin-top: 4px; color: #94a3b8; font-size: 12px; }
+.crew-card ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; font-size: 14px; }
+.crew-card li { display: flex; align-items: center; gap: 8px; }
+.crew-card small { color: #94a3b8; font-size: 12px; }
 .status-line { display: flex; align-items: center; gap: 8px; margin-top: 4px; color: #fff; font-size: 19px; }
 .status-dot { width: 10px; height: 10px; border-radius: 50%; }
 .tone-online { background: #22c55e; box-shadow: 0 0 0 4px rgb(34 197 94 / 20%); }

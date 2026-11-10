@@ -6,7 +6,7 @@ const auditLogSchema = new mongoose.Schema({
     actorName: { type: String, default: null, maxlength: 120 },
     actorRole: { type: String, default: null },
     action: { type: String, required: true, maxlength: 80 },   // e.g. "incident.created"
-    targetType: { type: String, default: null, maxlength: 40 }, // incident | resource | user | equipment | session
+    targetType: { type: String, default: null, maxlength: 40 }, // incident | resource | user | session
     targetId: { type: String, default: null, maxlength: 64 },
     summary: { type: String, default: '', maxlength: 300 },
     meta: { type: mongoose.Schema.Types.Mixed, default: undefined },

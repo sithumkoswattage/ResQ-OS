@@ -28,7 +28,7 @@
       <div v-else-if="filtered.length" class="c-table-wrap">
         <table class="c-table">
           <thead>
-            <tr><th>Unit</th><th>Type</th><th>Status</th><th>Operator</th><th>Last seen</th><th></th></tr>
+            <tr><th>Unit</th><th>Type</th><th>Status</th><th>Crew</th><th>Last seen</th><th></th></tr>
           </thead>
           <tbody>
             <tr v-for="unit in filtered" :key="unit._id">
@@ -43,13 +43,16 @@
                 <div v-if="unit.assignedIncident" class="muted">{{ unit.assignedIncident.code }}</div>
               </td>
               <td>
-                <template v-if="unit.operator">{{ unit.operator.username }}<div class="muted">{{ unit.operator.email }}</div></template>
-                <span v-else class="muted">Not linked</span>
+                <div v-for="member in unit.crew" :key="member.id" class="crew-line" :title="member.email">
+                  <span class="c-dot" :class="{ on: member.onDuty }"></span>{{ member.username }}
+                  <span class="muted">{{ member.onDuty ? 'on duty' : 'off duty' }}</span>
+                </div>
+                <span v-if="!unit.crew?.length" class="muted">No crew</span>
               </td>
               <td class="muted">{{ unit.lastSeen ? timeAgo(unit.lastSeen, now) : 'Never' }}</td>
               <td>
                 <div class="actions">
-                  <button class="c-btn sm" type="button" @click="openDialog('operator', unit)">{{ unit.operator ? 'Change operator' : 'Link operator' }}</button>
+                  <button class="c-btn sm" type="button" @click="openDialog('crew', unit)">Manage crew</button>
                   <button v-if="unit.status === 'suspended'" class="c-btn sm" type="button" @click="reactivate(unit)">Reactivate</button>
                   <button v-else class="c-btn sm danger" type="button" @click="openDialog('suspend', unit)">Suspend</button>
                   <button class="c-btn sm danger" type="button" :disabled="unit.status === 'dispatched'" :title="unit.status === 'dispatched' ? 'Release the unit first' : ''" @click="openDialog('delete', unit)">Remove</button>
@@ -94,13 +97,21 @@
         <label class="c-field">Reason (optional, shown in the activity log)<input v-model.trim="form.reason" class="c-input" maxlength="200" /></label>
       </template>
 
-      <template v-else-if="dialog.type === 'operator'">
-        <p>Link <strong>{{ dialog.unit.unitCode }}</strong> to a field-unit account. Leave the email empty to remove the current operator.</p>
-        <label class="c-field">Field account email<input v-model.trim="form.email" type="email" class="c-input" placeholder="unit@example.com" /></label>
+      <template v-else-if="dialog.type === 'crew'">
+        <p>People who operate <strong>{{ dialog.unit.unitCode }}</strong>. Each one goes on and off duty from their own field screen; the unit is online while anyone is on duty.</p>
+        <ul class="crew-list">
+          <li v-for="member in dialogCrew" :key="member.id">
+            <span><span class="c-dot" :class="{ on: member.onDuty }"></span><strong>{{ member.username }}</strong>
+              <span class="muted"> · {{ member.email }} · {{ member.onDuty ? 'on duty' : 'off duty' }}</span></span>
+            <button class="c-btn sm danger" type="button" :disabled="busy" @click="removeMember(member)">Remove</button>
+          </li>
+          <li v-if="!dialogCrew.length" class="muted">Nobody yet.</li>
+        </ul>
+        <label class="c-field">Add a person (field account email)<input v-model.trim="form.email" type="email" class="c-input" placeholder="unit@example.com" /></label>
       </template>
 
       <template v-else-if="dialog.type === 'delete'">
-        <p>Remove <strong>{{ dialog.unit.unitCode }}</strong> from the fleet? Its operator link is cleared and its equipment is unassigned. This cannot be undone.</p>
+        <p>Remove <strong>{{ dialog.unit.unitCode }}</strong> from the fleet? Its crew is unlinked (the accounts stay). This cannot be undone.</p>
       </template>
     </ConsoleModal>
   </section>
@@ -138,12 +149,14 @@ const filtered = computed(() => {
 const dialogTitle = computed(() => ({
   create: 'Register a unit',
   suspend: `Suspend ${dialog.value?.unit?.unitCode}`,
-  operator: 'Link operator',
+  crew: `Crew of ${dialog.value?.unit?.unitCode}`,
   delete: 'Remove unit'
 }[dialog.value?.type] || ''))
+// The live copy of the unit being edited, so the crew list refreshes after changes.
+const dialogCrew = computed(() => units.value.find((u) => u._id === dialog.value?.unit?._id)?.crew || [])
 const submitLabel = computed(() => {
   if (dialog.value?.type === 'suspend') return needsForce.value ? 'Release and suspend' : 'Suspend unit'
-  return { create: 'Register unit', operator: 'Save', delete: 'Remove unit' }[dialog.value?.type] || 'Save'
+  return { create: 'Register unit', crew: 'Add person', delete: 'Remove unit' }[dialog.value?.type] || 'Save'
 })
 
 async function load() {
@@ -161,7 +174,7 @@ async function load() {
 function openDialog(type, unit = null) {
   formError.value = ''
   needsForce.value = false
-  Object.assign(form, { unitCode: '', name: '', type: '', status: 'offline', latitude: 6.9271, longitude: 79.8612, reason: '', email: unit?.operator?.email || '' })
+  Object.assign(form, { unitCode: '', name: '', type: '', status: 'offline', latitude: 6.9271, longitude: 79.8612, reason: '', email: '' })
   dialog.value = { type, unit }
 }
 
@@ -177,8 +190,12 @@ async function submit() {
       })
     } else if (type === 'suspend') {
       await api.post(`/admin/units/${unit._id}/suspend`, { reason: form.reason, force: needsForce.value })
-    } else if (type === 'operator') {
-      await api.put(`/resources/${unit._id}/operator`, { email: form.email || null })
+    } else if (type === 'crew') {
+      if (form.email) await api.put(`/resources/${unit._id}/operator`, { email: form.email.toLowerCase() })
+      await load()
+      form.email = ''
+      busy.value = false
+      return // keep the dialog open so more people can be added or removed
     } else if (type === 'delete') {
       await api.delete(`/resources/${unit._id}`)
     }
@@ -191,6 +208,19 @@ async function submit() {
     } else {
       formError.value = err.response?.data?.message || 'That did not work. Please try again.'
     }
+  } finally {
+    busy.value = false
+  }
+}
+
+async function removeMember(member) {
+  busy.value = true
+  formError.value = ''
+  try {
+    await api.delete(`/resources/${dialog.value.unit._id}/crew/${member.id}`)
+    await load()
+  } catch (err) {
+    formError.value = err.response?.data?.message || 'Unable to remove this person.'
   } finally {
     busy.value = false
   }
@@ -214,7 +244,7 @@ onMounted(() => {
       const known = units.value.find((u) => u._id === unit._id)
       // New unit, or a different incident: reload so operator/incident details are populated.
       if (!known || (unit.assignedIncident || null) !== (known.assignedIncident?._id ?? null)) return load()
-      units.value = units.value.map((u) => (u._id === unit._id ? { ...u, ...unit, assignedIncident: u.assignedIncident, operator: u.operator } : u))
+      units.value = units.value.map((u) => (u._id === unit._id ? { ...u, ...unit, assignedIncident: u.assignedIncident, operator: u.operator, crew: u.crew } : u))
     },
     'unit:location': (loc) => {
       units.value = units.value.map((u) => (u._id === loc.resourceId

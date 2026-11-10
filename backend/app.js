@@ -10,7 +10,6 @@ const meRoutes = require('./routes/me');
 const routeRoutes = require('./routes/route');
 const streamRoutes = require('./routes/stream');
 const adminRoutes = require('./routes/admin');
-const equipmentRoutes = require('./routes/equipment');
 const { verifyToken, requireRole } = require('./middleware/auth');
 const { requireActiveAccount } = require('./middleware/account');
 const { securityHeaders, buildCorsOptions } = require('./middleware/security');
@@ -50,7 +49,6 @@ app.use('/api/incidents', ...staff, incidentRoutes);
 app.use('/api/resources', ...staff, resourceRoutes);
 app.use('/api/command-center', ...staff, commandCenterRoutes);
 app.use('/api/alerts', ...staff, alertRoutes);
-app.use('/api/equipment', ...staff, equipmentRoutes); // writes are admin-only inside
 app.use('/api/admin', verifyToken, requireActiveAccount, requireRole('admin'), adminRoutes);
 app.use('/api/me', verifyToken, requireActiveAccount, requireRole('responder'), meRoutes);
 app.use('/api/route', verifyToken, requireActiveAccount, routeRoutes);

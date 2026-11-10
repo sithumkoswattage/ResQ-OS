@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+/* Inter webfont removed: a blocked/slow network stalled page load. Falls back to system fonts. */
 @import "tailwindcss"; /* Tailwind v3? Replace this line with: @tailwind base; @tailwind components; @tailwind utilities; */
 
 html,

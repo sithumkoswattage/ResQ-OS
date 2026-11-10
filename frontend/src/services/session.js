@@ -20,7 +20,9 @@ export function getRole() {
 }
 
 export function homeFor(role) {
-  return role === 'responder' ? '/field' : '/dispatcher'
+  if (role === 'admin') return '/admin'
+  if (role === 'responder') return '/field'
+  return '/dispatcher'
 }
 
 export function clearSession() {

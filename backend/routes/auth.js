@@ -32,7 +32,7 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
     try {
-        const { email, username, identifier, password, role } = req.body;
+        const { email, username, identifier, password } = req.body;
         const loginId = identifier || username || email;
 
         if (!loginId || !password) {
@@ -61,16 +61,6 @@ router.post('/login', async (req, res) => {
         }
 
 
-        // Normalize roles for validation if a specific role was selected
-        if (role) {
-            const normalizedReqRole = role === 'field' ? 'responder' : role;
-            const normalizedUserRole = user.role === 'field' ? 'responder' : user.role;
-            if (normalizedReqRole !== normalizedUserRole) {
-                return res.status(403).json({
-                    message: `Access denied: Account is registered as ${user.role}, not ${role}.`
-                });
-            }
-        }
         const token = jwt.sign(
             { id: user._id, role: user.role, username: user.username },
             process.env.JWT_SECRET,

@@ -6,7 +6,6 @@
       <RouterLink to="/admin" end class="sidebar-link"><LayoutDashboard :size="20" /><span>Overview</span></RouterLink>
       <RouterLink to="/admin/users" class="sidebar-link"><Users :size="20" /><span>Accounts</span></RouterLink>
       <RouterLink to="/admin/units" class="sidebar-link"><Ambulance :size="20" /><span>Units</span></RouterLink>
-      <RouterLink to="/admin/equipment" class="sidebar-link"><Wrench :size="20" /><span>Equipment</span></RouterLink>
       <RouterLink to="/admin/audit" class="sidebar-link"><ScrollText :size="20" /><span>Activity log</span></RouterLink>
 
       <div class="divider"></div>
@@ -16,7 +15,7 @@
 </template>
 
 <script setup>
-import { LayoutDashboard, Users, Ambulance, Wrench, ScrollText, MapPinned } from 'lucide-vue-next'
+import { LayoutDashboard, Users, Ambulance, ScrollText, MapPinned } from 'lucide-vue-next'
 </script>
 
 <style scoped>
