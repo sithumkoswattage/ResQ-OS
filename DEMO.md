@@ -51,7 +51,7 @@ docker compose exec -it backend node createDispatcher.js
 
 ## 4. Open the app
 
-http://localhost:8080
+http://localhost:8081
 
 - **Dispatcher:** a normal browser window, Dispatcher tab.
 - **Field unit:** a private/incognito window, **Field Unit** tab, e.g. `res-104`.
@@ -76,4 +76,4 @@ docker compose down -v    # stop and wipe the database
 
 - **Map is grey / ETAs say "approx.":** the map tiles and the drive-time routing come from the internet. The app still works without them.
 - **A container keeps restarting:** `docker compose logs backend` (or `mongo`, `frontend`).
-- **Port 8080 already in use:** change `"8080:80"` in `docker-compose.yml` to e.g. `"8081:80"`, and `CORS_ORIGINS` to match.
+- **Port 8081 already in use:** change the left number in `"8081:8080"` in `docker-compose.yml` (e.g. `"8082:8080"`), and set `CORS_ORIGINS` to match.
