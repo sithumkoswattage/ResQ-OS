@@ -1,6 +1,5 @@
-// Single place that knows where the login session is stored.
-const KEYS = ['token', 'user']
-
+// Where the sign-in token and user live (localStorage for "Remember me",
+// sessionStorage otherwise).
 export function getToken() {
   return localStorage.getItem('token') || sessionStorage.getItem('token')
 }
@@ -16,19 +15,17 @@ export function getUser() {
 }
 
 export function getRole() {
-  return getUser()?.role ?? null
+  const role = getUser()?.role
+  return role === 'field' ? 'responder' : role || null
+}
+
+export function homeFor(role) {
+  return role === 'responder' ? '/field' : '/dispatcher'
 }
 
 export function clearSession() {
-  for (const key of KEYS) {
-    localStorage.removeItem(key)
-    sessionStorage.removeItem(key)
+  for (const storage of [localStorage, sessionStorage]) {
+    storage.removeItem('token')
+    storage.removeItem('user')
   }
-}
-
-// Where each role lands after signing in.
-export function homeFor(role) {
-  if (role === 'admin') return '/admin'
-  if (role === 'dispatcher') return '/dispatcher'
-  return '/'
 }

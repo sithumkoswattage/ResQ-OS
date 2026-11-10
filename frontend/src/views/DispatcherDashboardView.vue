@@ -163,6 +163,7 @@ import {
   Truck
 } from 'lucide-vue-next'
 import api from '../services/api'
+import { connectStream } from '../services/stream'
 
 const incidents = ref([])
 const units = ref([])
@@ -214,15 +215,33 @@ const stats = computed(() => [
 
 const today = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date())
 
+let reloadTimer
+let closeStream
+
+function scheduleReload() {
+  window.clearTimeout(reloadTimer)
+  reloadTimer = window.setTimeout(() => loadOverview({ quiet: true }), 400)
+}
+
 onMounted(() => {
   loadOverview()
-  refreshTimer = window.setInterval(loadOverview, 30000)
+  closeStream = connectStream({
+    'incident:created': scheduleReload,
+    'incident:updated': scheduleReload,
+    'unit:status': scheduleReload,
+    'unit:removed': scheduleReload
+  }, { onReconnect: scheduleReload })
+  refreshTimer = window.setInterval(() => loadOverview({ quiet: true }), 120000)
 })
 
-onUnmounted(() => window.clearInterval(refreshTimer))
+onUnmounted(() => {
+  closeStream?.()
+  window.clearInterval(refreshTimer)
+  window.clearTimeout(reloadTimer)
+})
 
-async function loadOverview() {
-  loading.value = true
+async function loadOverview({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
   loadError.value = ''
   try {
     const { data } = await api.get('/command-center/overview')

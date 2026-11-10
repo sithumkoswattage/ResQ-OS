@@ -1,17 +1,18 @@
 import api from './api'
-import { clearSession } from './session'
 
-// Live updates over Server-Sent Events (see API_CONTRACT.md).
-//   const stop = connectStream({ 'unit:status': (unit) => ... }, { onStatus: (ok) => ... })
-// Call stop() on unmount. Events missed while disconnected are not replayed,
-// so reload your data when onStatus(true) fires after a reconnect.
-export function connectStream(handlers = {}, { onStatus } = {}) {
-  let source = null
+// Opens the Server-Sent Events stream and keeps it open.
+// `handlers` maps event names (see API_CONTRACT.md) to callbacks receiving the
+// parsed JSON payload. `onReconnect` runs after every reconnect (not the first
+// connect), so callers can reload data missed while disconnected.
+// Returns a function that closes the stream for good.
+export function connectStream(handlers, { onReconnect } = {}) {
+  let source
   let closed = false
   let retry = 1000
-  let timer = null
+  let timer
+  let connectedBefore = false
 
-  function schedule() {
+  function scheduleRetry() {
     if (closed) return
     timer = setTimeout(open, retry)
     retry = Math.min(retry * 2, 15000)
@@ -20,36 +21,31 @@ export function connectStream(handlers = {}, { onStatus } = {}) {
   async function open() {
     if (closed) return
     try {
-      // Tickets are single-use, so every (re)connect needs a fresh one.
       const { data } = await api.post('/stream/ticket')
       if (closed) return
-      const base = String(api.defaults.baseURL).replace(/\/$/, '')
+      const base = api.defaults.baseURL.replace(/\/$/, '')
       source = new EventSource(`${base}/stream?ticket=${encodeURIComponent(data.ticket)}`)
       source.addEventListener('connected', () => {
         retry = 1000
-        onStatus?.(true)
+        if (connectedBefore) onReconnect?.()
+        connectedBefore = true
       })
-      source.addEventListener('account:suspended', () => {
-        clearSession()
-        window.location.assign('/?reason=suspended')
-      })
-      for (const [event, handler] of Object.entries(handlers)) {
-        source.addEventListener(event, (message) => {
+      for (const [event, fn] of Object.entries(handlers)) {
+        source.addEventListener(event, (e) => {
           try {
-            handler(JSON.parse(message.data))
-          } catch (error) {
-            console.error(`Error handling "${event}"`, error)
+            fn(JSON.parse(e.data))
+          } catch (err) {
+            console.error(`Stream handler for "${event}" failed`, err)
           }
         })
       }
+      // Tickets are single-use: never let EventSource auto-reconnect.
       source.onerror = () => {
         source.close()
-        onStatus?.(false)
-        schedule()
+        scheduleRetry()
       }
     } catch {
-      onStatus?.(false)
-      schedule()
+      scheduleRetry()
     }
   }
 

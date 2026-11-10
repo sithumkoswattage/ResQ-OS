@@ -127,7 +127,9 @@
             class="rounded-xl border border-sky-500/30 bg-sky-950/30 px-4 py-3 text-sm text-sky-100"
             role="status"
           >
-            Please sign in to continue.
+            {{ String(route.query.redirect).startsWith('/field')
+              ? 'Sign in with your field unit account to continue.'
+              : 'Your session has ended. Sign in again to continue.' }}
           </div>
 
           <!-- Error Message Alert -->
@@ -185,13 +187,15 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import loginBg from '../assets/login-bg.jpg'
+import fieldBg from '../assets/field-bg.jpg'
 import api from '../services/api'
-import { homeFor } from '../services/session'
+import { clearSession, getRole, homeFor } from '../services/session'
 
 const route = useRoute()
 const router = useRouter()
 const username = ref('')
 const password = ref('')
+const role = ref(String(route.query.redirect || '').startsWith('/field') ? 'responder' : 'dispatcher')
 const rememberMe = ref(false)
 const showPassword = ref(false)
 const isSubmitting = ref(false)
@@ -212,31 +216,33 @@ const handleLogin = async () => {
 
   isSubmitting.value = true
   try {
-    // The server decides what kind of account this is; there is no role picker.
     const { data } = await api.post('/auth/login', {
       identifier: username.value.trim(),
-      password: password.value
+      password: password.value,
+      role: role.value
     })
 
-    const userRole = data.user?.role ?? data.role
-
-    if (userRole === 'responder') {
-      // The field-unit app is not part of this build yet; do not leave a
-      // half-signed-in session behind.
-      errorMessage.value = 'Field responder portal is currently undergoing scheduled maintenance.'
-      return
-    }
-
+    clearSession()
     const storage = rememberMe.value ? localStorage : sessionStorage
     storage.setItem('token', data.token)
     storage.setItem('user', JSON.stringify(data.user || { username: data.username, role: data.role }))
 
-    const home = homeFor(userRole)
+    const home = homeFor(getRole())
     const redirect = route.query.redirect
-    const allowed = typeof redirect === 'string' && (redirect === home || redirect.startsWith(`${home}/`))
-    await router.push(allowed ? redirect : home)
+    const target = typeof redirect === 'string' &&
+      (redirect === home || redirect.startsWith(`${home}/`))
+      ? redirect
+      : home
+
+    await router.push(target)
   } catch (err) {
-    errorMessage.value = err.response?.data?.message || 'Unable to connect to the server.'
+    if (err.response?.status === 429) {
+      errorMessage.value = err.response.data?.message || 'Too many sign-in attempts. Please wait and try again.'
+    } else if (err.response) {
+      errorMessage.value = err.response.data?.message || err.response.data?.error || 'Sign in failed. Please check your credentials.'
+    } else {
+      errorMessage.value = 'Unable to connect to the server.'
+    }
   } finally {
     isSubmitting.value = false
   }

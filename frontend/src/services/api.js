@@ -14,23 +14,26 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// 401 = session expired/invalid; 403 "account_suspended" = an administrator
-// suspended this account. Either way, drop the session and go to sign-in.
-// (The login request itself is excluded so its errors show on the form.)
+// An expired or invalid session (401) sends the user back to sign in,
+// remembering where they were. Login failures are left to the login form.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status
-    const code = error.response?.data?.code
-    const isLogin = String(error.config?.url || '').includes('/auth/login')
-    if (!isLogin && (status === 401 || (status === 403 && code === 'account_suspended'))) {
+    const isLogin = error.config?.url?.includes('/auth/login')
+    if (status === 401 && !isLogin) {
       clearSession()
+      const here = window.location.pathname + window.location.search
       if (window.location.pathname !== '/') {
-        window.location.assign(`/?reason=${code === 'account_suspended' ? 'suspended' : 'expired'}`)
+        window.location.assign(`/?redirect=${encodeURIComponent(here)}`)
       }
     }
     return Promise.reject(error)
   }
 )
+
+export function errorMessage(error, fallback) {
+  return error?.response?.data?.message || fallback
+}
 
 export default api

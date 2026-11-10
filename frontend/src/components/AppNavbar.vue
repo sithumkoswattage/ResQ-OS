@@ -18,11 +18,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { clearSession, getUser } from '../services/session'
-
-defineProps({
-  title: { type: String, default: 'Emergency Command Center' }
-})
+import { clearSession } from '../services/session'
 
 const router = useRouter()
 const username = ref('')
