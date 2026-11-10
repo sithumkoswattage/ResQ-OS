@@ -18,6 +18,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { clearSession } from '../services/session'
 
 const router = useRouter()
 const username = ref('')
@@ -35,10 +36,7 @@ onMounted(() => {
 })
 
 const handleLogout = () => {
-  localStorage.removeItem('token')
-  localStorage.removeItem('user')
-  sessionStorage.removeItem('token')
-  sessionStorage.removeItem('user')
+  clearSession()
   router.push('/')
 }
 </script>
