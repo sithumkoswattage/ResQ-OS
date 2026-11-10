@@ -10,6 +10,10 @@ import ResourcesView from '../views/ResourcesView.vue'
 import CommandCenterView from '../views/CommandCenterView.vue'
 import AlertsView from '../views/AlertsView.vue'
 import FieldDashboard from '../views/FieldDashboard.vue'
+import AdminOverviewView from '../views/admin/AdminOverviewView.vue'
+import AdminUsersView from '../views/admin/AdminUsersView.vue'
+import AdminUnitsView from '../views/admin/AdminUnitsView.vue'
+import AdminAuditView from '../views/admin/AdminAuditView.vue'
 import { clearSession, getRole, getToken, homeFor } from '../services/session'
 
 const routes = [
@@ -21,7 +25,7 @@ const routes = [
   {
     path: '/dispatcher',
     component: DispatcherLayout,
-    meta: { role: 'dispatcher' },
+    meta: { roles: ['dispatcher', 'admin'] },
     children: [
       { path: '', name: 'dispatcher', component: DashboardView },
       { path: 'incidents', name: 'incidents', component: IncidentsView },
@@ -32,10 +36,21 @@ const routes = [
     ]
   },
   {
+    path: '/admin',
+    component: AdminLayout,
+    meta: { roles: ['admin'] },
+    children: [
+      { path: '', name: 'admin', component: AdminOverviewView },
+      { path: 'users', name: 'admin-users', component: AdminUsersView },
+      { path: 'units', name: 'admin-units', component: AdminUnitsView },
+      { path: 'audit', name: 'admin-audit', component: AdminAuditView }
+    ]
+  },
+  {
     path: '/field',
     name: 'field',
     component: FieldDashboard,
-    meta: { role: 'responder' }
+    meta: { roles: ['responder'] }
   },
   {
     path: '/:pathMatch(.*)*',
@@ -51,14 +66,14 @@ const router = createRouter({
 router.beforeEach((to) => {
   const token = getToken()
   const role = getRole()
-  const requiredRole = to.matched.find((record) => record.meta.role)?.meta.role
+  const allowed = to.matched.find((record) => record.meta.roles)?.meta.roles
 
-  if (requiredRole) {
+  if (allowed) {
     if (!token || !role) {
       clearSession()
       return { name: 'login', query: { redirect: to.fullPath } }
     }
-    if (role !== requiredRole) return homeFor(role)
+    if (!allowed.includes(role)) return homeFor(role)
   } else if (to.name === 'login' && token && role) {
     return homeFor(role)
   }

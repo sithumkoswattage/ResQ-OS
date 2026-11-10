@@ -5,7 +5,7 @@ import api from './api'
 // parsed JSON payload. `onReconnect` runs after every reconnect (not the first
 // connect), so callers can reload data missed while disconnected.
 // Returns a function that closes the stream for good.
-export function connectStream(handlers, { onReconnect } = {}) {
+export function connectStream(handlers, { onReconnect, onStatus } = {}) {
   let source
   let closed = false
   let retry = 1000
@@ -27,6 +27,7 @@ export function connectStream(handlers, { onReconnect } = {}) {
       source = new EventSource(`${base}/stream?ticket=${encodeURIComponent(data.ticket)}`)
       source.addEventListener('connected', () => {
         retry = 1000
+        onStatus?.(true)
         if (connectedBefore) onReconnect?.()
         connectedBefore = true
       })
@@ -42,9 +43,11 @@ export function connectStream(handlers, { onReconnect } = {}) {
       // Tickets are single-use: never let EventSource auto-reconnect.
       source.onerror = () => {
         source.close()
+        onStatus?.(false)
         scheduleRetry()
       }
     } catch {
+      onStatus?.(false)
       scheduleRetry()
     }
   }
