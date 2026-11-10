@@ -23,6 +23,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random string of 16+ characters}
       CORS_ORIGINS: http://localhost:8080
       TRUST_PROXY: 1
+      # Containers have no IPv6, and Node's fetch gives each address only 250 ms
+      # by default - too short for slow links to the routing server.
+      NODE_OPTIONS: --network-family-autoselection-attempt-timeout=2000
     ports:
       - "5000:5000"
     depends_on:
