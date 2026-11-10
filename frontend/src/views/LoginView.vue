@@ -195,7 +195,6 @@ const route = useRoute()
 const router = useRouter()
 const username = ref('')
 const password = ref('')
-const role = ref(String(route.query.redirect || '').startsWith('/field') ? 'responder' : 'dispatcher')
 const rememberMe = ref(false)
 const showPassword = ref(false)
 const isSubmitting = ref(false)
@@ -218,8 +217,7 @@ const handleLogin = async () => {
   try {
     const { data } = await api.post('/auth/login', {
       identifier: username.value.trim(),
-      password: password.value,
-      role: role.value
+      password: password.value
     })
 
     clearSession()
