@@ -45,6 +45,15 @@
         <Bell :size="20" />
         <span>Alerts</span>
       </RouterLink>
+
+      <RouterLink
+        v-if="isAdmin"
+        to="/admin"
+        class="sidebar-link"
+      >
+        <ShieldCheck :size="20" />
+        <span>Admin console</span>
+      </RouterLink>
     </nav>
   </aside>
 </template>
@@ -55,8 +64,12 @@ import {
   Siren,
   Ambulance,
   MapPinned,
-  Bell
+  Bell,
+  ShieldCheck
 } from 'lucide-vue-next'
+import { getRole } from '../services/session'
+
+const isAdmin = getRole() === 'admin'
 </script>
 
 <style scoped>
