@@ -12,7 +12,7 @@ cd ResQ-OS
 ## 2. Start everything
 
 ```bash
-export JWT_SECRET=$(openssl rand -hex 32)
+echo "JWT_SECRET=$(openssl rand -hex 32)" > .env   # once; .env is not committed
 docker compose up --build -d
 docker compose ps        # mongo, backend and frontend should all be "running"
 ```
@@ -21,37 +21,28 @@ The first run downloads and builds images, which takes a few minutes and needs i
 
 ## 3. Add demo data (first time only)
 
-The seed scripts only accept a database at `127.0.0.1`, so run them inside MongoDB's network. Find the image and container names first (they follow the folder name, e.g. `resq-os-backend` and `resq-os-mongo-1`):
-
 ```bash
-docker images | grep backend
-docker compose ps mongo
+bash demo-setup.sh 'choose-a-password'
 ```
 
-Then, replacing the names if yours differ:
+This adds sample incidents and five units, plus these logins, all with the password you chose:
 
-```bash
-docker run --rm --network container:resq-os-mongo-1 \
-  -e MONGO_URI=mongodb://127.0.0.1:27017/resqos \
-  resq-os-backend node seedInitialData.js
+- Dispatcher tab: `dispatcher`
+- Field Unit tab: `res-101`, `med-103`, `res-104`, `pat-102`, `wtr-101`
 
-docker run --rm --network container:resq-os-mongo-1 \
-  -e MONGO_URI=mongodb://127.0.0.1:27017/resqos \
-  -e DEMO_RESPONDER_PASSWORD='choose-a-password' \
-  resq-os-backend node seedDemoResponders.js
-```
-
-This creates sample incidents, five units, and field logins `res-101`, `med-103`, `res-104`, `pat-102`, `wtr-101`, all with the password you chose.
-
-Create a dispatcher login (type the answers when asked):
-
-```bash
-docker compose exec -it backend node createDispatcher.js
-```
+It is safe to run again; existing records are kept.
 
 ## 4. Open the app
 
-http://localhost:8081
+http://localhost:8090
+
+To open it from another computer (e.g. `10.50.80.1`) with location working, tunnel the port so the browser sees `localhost`:
+
+```bash
+ssh -L 8090:localhost:8090 user@10.50.80.2    # keep this window open
+```
+
+Then browse to `http://localhost:8090` on that computer. Type the `http://` in full; Edge may otherwise switch to https and fail.
 
 - **Dispatcher:** a normal browser window, Dispatcher tab.
 - **Field unit:** a private/incognito window, **Field Unit** tab, e.g. `res-104`.
@@ -76,4 +67,4 @@ docker compose down -v    # stop and wipe the database
 
 - **Map is grey / ETAs say "approx.":** the map tiles and the drive-time routing come from the internet. The app still works without them.
 - **A container keeps restarting:** `docker compose logs backend` (or `mongo`, `frontend`).
-- **Port 8081 already in use:** change the left number in `"8081:8080"` in `docker-compose.yml` (e.g. `"8082:8080"`), and set `CORS_ORIGINS` to match.
+- **Port 8090 already in use:** change the left number in `"8090:8080"` in `docker-compose.yml` (e.g. `"8095:8080"`), and set `CORS_ORIGINS` to match.

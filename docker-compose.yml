@@ -1,5 +1,5 @@
 # Local full-stack run:  JWT_SECRET=<random 16+ chars> docker compose up --build
-# App: http://localhost:8081   API: http://localhost:5000/api
+# App: http://localhost:8090   API: http://localhost:5000/api
 services:
   mongo:
     image: mongo:7
@@ -21,7 +21,7 @@ services:
       PORT: 5000
       MONGO_URI: mongodb://mongo:27017/resqos
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random string of 16+ characters}
-      CORS_ORIGINS: http://localhost:8081
+      CORS_ORIGINS: http://localhost:8090
       TRUST_PROXY: 1
       # Containers have no IPv6, and Node's fetch gives each address only 250 ms
       # by default - too short for slow links to the routing server.
@@ -36,7 +36,7 @@ services:
     build: ./frontend
     restart: unless-stopped
     ports:
-      - "8081:8080"
+      - "8090:8080"
     depends_on:
       - backend
 
