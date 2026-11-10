@@ -13,6 +13,25 @@ async function startServer() {
     }
     await mongoose.connect(process.env.MONGO_URI);
     console.log('MongoDB connected successfully');
+    // Databases from before crews have a unique index on User.unit (one person per unit); replace it.
+    try {
+        await require('./models/User').syncIndexes();
+    } catch (error) {
+        console.error('Could not update the User indexes (crews of more than one person need this):', error.message);
+    }
+    // One-time move to crews: people already linked to a live unit start out on duty, so nothing changes under them.
+    try {
+        const User = require('./models/User');
+        const Resource = require('./models/Resource');
+        const liveUnits = await Resource.find({ status: { $in: ['available', 'dispatched'] } }).select('_id').lean();
+        const migrated = await User.updateMany(
+            { onDuty: { $exists: false }, unit: { $in: liveUnits.map((u) => u._id) } },
+            { $set: { onDuty: true, onDutyAt: new Date() } }
+        );
+        if (migrated.modifiedCount) console.log(`Marked ${migrated.modifiedCount} operator(s) on duty for their live units.`);
+    } catch (error) {
+        console.error('Crew migration skipped:', error.message);
+    }
     await ensureCurrentStateAlerts();
     app.listen(PORT, () => console.log(`ResQ-OS Server running on port ${PORT}`));
 }

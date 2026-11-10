@@ -13,6 +13,7 @@ test('API integration', { skip }, async (t) => {
     const mongoose = require('mongoose');
     const app = require('../app');
     const User = require('../models/User');
+    const Resource = require('../models/Resource');
 
     await mongoose.connect(MONGO, { dbName: `resqos_test_${Date.now()}` });
     const server = app.listen(0);
@@ -73,7 +74,7 @@ test('API integration', { skip }, async (t) => {
         assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
     });
 
-    await t.test('admin: manage users, suspend accounts and units, equipment, audit trail', async () => {
+    await t.test('admin: manage users, suspend accounts and units, audit trail', async () => {
         await User.create({ username: 'root', email: 'root@test.local', password: hashed, role: 'admin' });
         const admin = await login('root', password);
         assert.equal((await call('GET', '/admin/overview', { token: dispatcher })).status, 403, 'dispatchers are not admins');
@@ -107,19 +108,47 @@ test('API integration', { skip }, async (t) => {
         assert.equal((await call('PATCH', `/resources/${unit._id}`, { token: dispatcher, body: { status: 'available' } })).status, 409, 'dispatchers cannot lift a suspension');
         assert.equal((await call('POST', `/admin/units/${unit._id}/reactivate`, { token: admin })).status, 200);
 
-        // equipment: only admins write; dispatchers can read
-        const gear = await call('POST', '/equipment', { token: admin, body: { assetTag: 'defib-01', name: 'Defibrillator', category: 'medical' } });
-        assert.equal(gear.status, 201);
-        assert.equal(gear.data.assetTag, 'DEFIB-01');
-        assert.equal((await call('POST', '/equipment', { token: dispatcher, body: { assetTag: 'X', name: 'X' } })).status, 403);
-        assert.equal((await call('GET', '/equipment', { token: dispatcher })).status, 200);
-        assert.equal((await call('POST', `/equipment/${gear.data._id}/assign`, { token: admin, body: { unitId: unit._id } })).status, 200);
-        assert.equal((await call('PATCH', `/equipment/${gear.data._id}`, { token: admin, body: { status: 'maintenance' } })).data.assignedUnit, null, 'out-of-service gear is unassigned');
+        // solo unit: creating a field account can create and link its unit in one step
+        const solo = await call('POST', '/admin/users', { token: admin, body: {
+            username: 'officer1', email: 'officer1@test.local', password, role: 'responder',
+            createUnit: { unitCode: 'pc-solo', type: 'Police Officer' }
+        } });
+        assert.equal(solo.status, 201);
+        assert.equal(solo.data.unit.unitCode, 'PC-SOLO');
+        const soloUnit = await Resource.findById(solo.data.unit._id);
+        assert.equal(soloUnit.status, 'offline', 'a new unit starts offline until its operator is on duty');
+        assert.equal(soloUnit.name, 'officer1', 'the unit is named after the person by default');
+        assert.equal((await call('POST', '/admin/users', { token: admin, body: {
+            username: 'officer3', email: 'officer3@test.local', password, role: 'dispatcher', unit: String(soloUnit._id)
+        } })).status, 400, 'only field accounts take a unit');
+        assert.equal(await User.exists({ username: 'officer3' }), null, 'a refused account is not created');
+
+        // a unit on a dispatch cannot change operator; suspending the operator takes an idle unit off the board
+        await Resource.updateOne({ _id: soloUnit._id }, { status: 'available' });
+        const suspendedOfficer = await call('POST', `/admin/users/${solo.data._id}/suspend`, { token: admin });
+        assert.equal(suspendedOfficer.status, 200);
+        assert.equal((await Resource.findById(soloUnit._id)).status, 'offline');
+        await Resource.updateOne({ _id: soloUnit._id }, { status: 'dispatched' });
+        assert.equal((await call('PATCH', `/admin/users/${solo.data._id}`, { token: admin, body: { unit: null } })).status, 409);
+        assert.equal((await call('PUT', `/resources/${soloUnit._id}/operator`, { token: dispatcher, body: { email: null } })).status, 409);
+        await Resource.updateOne({ _id: soloUnit._id }, { status: 'offline' });
+        assert.equal((await call('PATCH', `/admin/users/${solo.data._id}`, { token: admin, body: { unit: null } })).status, 200);
+
+        // deleting accounts: not yourself, not while the operator's unit is on a dispatch; the unit survives
+        assert.equal((await call('DELETE', `/admin/users/${self._id}`, { token: admin })).status, 409, 'cannot delete yourself');
+        await call('PATCH', `/admin/users/${solo.data._id}`, { token: admin, body: { unit: String(soloUnit._id) } });
+        await Resource.updateOne({ _id: soloUnit._id }, { status: 'dispatched' });
+        assert.equal((await call('DELETE', `/admin/users/${solo.data._id}`, { token: admin })).status, 409, 'unit is on a dispatch');
+        await Resource.updateOne({ _id: soloUnit._id }, { status: 'offline' });
+        assert.equal((await call('DELETE', `/admin/users/${solo.data._id}`, { token: admin })).status, 204);
+        assert.equal(await User.exists({ _id: solo.data._id }), null);
+        assert.ok(await Resource.exists({ _id: soloUnit._id }), 'the unit is kept');
+        assert.equal((await call('GET', '/incidents', { token: await login('temp', password) })).status, 200, 'other accounts are unaffected');
 
         // audit trail records all of it
         const trail = await call('GET', '/admin/audit?limit=100', { token: admin });
         const actions = trail.data.entries.map((e) => e.action);
-        for (const expected of ['auth.login', 'user.created', 'user.suspended', 'unit.suspended', 'equipment.created']) {
+        for (const expected of ['auth.login', 'user.created', 'user.suspended', 'user.deleted', 'unit.suspended', 'resource.created']) {
             assert.ok(actions.includes(expected), `missing audit action ${expected}`);
         }
     });
@@ -131,9 +160,11 @@ test('API integration', { skip }, async (t) => {
         const link = await call('PUT', `/resources/${unit._id}/operator`, { token: dispatcher, body: { email: 'unit1@test.local' } });
         assert.equal(link.status, 200);
 
+        assert.equal((await call('POST', '/me/location', { token: responder, body: { latitude: 6.94, longitude: 79.86 } })).status, 409, 'must be on duty to ping');
+        assert.equal((await call('PATCH', '/me/status', { token: responder, body: { status: 'available' } })).status, 200);
         assert.equal((await call('POST', '/me/location', { token: responder, body: { latitude: 6.94, longitude: 79.86 } })).status, 200);
         assert.equal((await call('PATCH', '/me/status', { token: responder, body: { status: 'offline' } })).status, 200);
-        assert.equal((await call('POST', '/me/location', { token: responder, body: { latitude: 6.94, longitude: 79.86 } })).status, 409, 'offline units cannot ping');
+        assert.equal((await call('POST', '/me/location', { token: responder, body: { latitude: 6.94, longitude: 79.86 } })).status, 409, 'off duty cannot ping');
         assert.equal((await call('PATCH', '/me/status', { token: responder, body: { status: 'available' } })).status, 200);
         assert.equal((await call('POST', '/me/location', { token: responder, body: { latitude: 'x', longitude: 1 } })).status, 400);
 
@@ -154,5 +185,64 @@ test('API integration', { skip }, async (t) => {
         assert.equal(done.status, 200);
         assert.equal(done.data.unit.status, 'available');
         assert.equal(done.data.assignment, null);
+    });
+
+    await t.test('crew: several people on one unit, each on or off duty', async () => {
+        const admin = await login('root', password);
+        const unit = await makeUnit('CREW-1', 6.93, 79.85);
+        const add = (username) => call('POST', '/admin/users', { token: admin, body: {
+            username, email: `${username}@test.local`, password, role: 'responder', unit: String(unit._id)
+        } });
+        const a = await add('crew-a');
+        const b = await add('crew-b');
+        assert.equal(a.status, 201);
+        assert.equal(b.status, 201, 'a second person can join the same unit');
+        const tokenA = await login('crew-a', password);
+        const tokenB = await login('crew-b', password);
+        const state = async () => (await Resource.findById(unit._id)).status;
+        const duty = (token, status) => call('PATCH', '/me/status', { token, body: { status } });
+
+        const listed = (await call('GET', '/resources', { token: dispatcher })).data.find((r) => r.unitCode === 'CREW-1');
+        assert.equal(listed.crew.length, 2);
+        assert.equal(await state(), 'offline', 'nobody on duty yet');
+
+        // the unit is online while anyone on the crew is on duty
+        assert.equal((await duty(tokenA, 'available')).status, 200);
+        assert.equal(await state(), 'available');
+        assert.equal((await duty(tokenB, 'available')).status, 200);
+        assert.equal((await duty(tokenA, 'offline')).status, 200);
+        assert.equal(await state(), 'available', 'still online: B is on duty');
+        assert.equal((await call('POST', '/me/location', { token: tokenA, body: { latitude: 6.9, longitude: 79.8 } })).status, 409, 'A is off duty so cannot ping');
+        assert.equal((await call('POST', '/me/location', { token: tokenB, body: { latitude: 6.91, longitude: 79.81 } })).status, 200);
+        assert.equal((await duty(tokenB, 'offline')).status, 200);
+        assert.equal(await state(), 'offline', 'last person off duty takes the unit offline');
+
+        // on a dispatch: anyone may leave while another stays; the last person on duty may not
+        await duty(tokenA, 'available');
+        await duty(tokenB, 'available');
+        const incident = await makeIncident('Crew dispatch');
+        assert.equal((await call('PATCH', `/resources/${unit._id}/assignment`, { token: dispatcher, body: { incidentId: incident._id } })).status, 200);
+        assert.equal((await duty(tokenA, 'offline')).status, 200);
+        assert.equal(await state(), 'dispatched');
+        assert.equal((await duty(tokenB, 'offline')).status, 409, 'last person on duty cannot leave a dispatch');
+        assert.equal((await call('PATCH', '/me/assignment', { token: tokenA, body: { progress: 'accepted' } })).status, 409, 'off duty cannot update the dispatch');
+        assert.equal((await call('PATCH', '/me/assignment', { token: tokenB, body: { progress: 'accepted' } })).status, 200);
+
+        // admin rules while dispatched
+        assert.equal((await call('DELETE', `/admin/users/${b.data._id}`, { token: admin })).status, 409, 'B is the last on duty');
+        assert.equal((await call('PATCH', `/admin/users/${b.data._id}`, { token: admin, body: { unit: null } })).status, 409);
+        assert.equal((await call('DELETE', `/admin/users/${a.data._id}`, { token: admin })).status, 204, 'A is off duty and B stays');
+        assert.equal((await call('DELETE', `/resources/${unit._id}/crew/${b.data._id}`, { token: dispatcher })).status, 409);
+
+        // finish, then the dispatcher can add and remove crew
+        await call('PATCH', '/me/assignment', { token: tokenB, body: { progress: 'on_scene' } });
+        await call('PATCH', '/me/assignment', { token: tokenB, body: { progress: 'completed' } });
+        await User.create({ username: 'crew-c', email: 'crew-c@test.local', password: hashed, role: 'responder' });
+        const added = await call('PUT', `/resources/${unit._id}/operator`, { token: dispatcher, body: { email: 'crew-c@test.local' } });
+        assert.equal(added.status, 200);
+        assert.equal((await call('GET', '/resources', { token: dispatcher })).data.find((r) => r.unitCode === 'CREW-1').crew.length, 2, 'B and the added person');
+        assert.equal((await call('DELETE', `/resources/${unit._id}/crew/${b.data._id}`, { token: dispatcher })).status, 204);
+        assert.equal(await state(), 'offline', 'removing the only person on duty takes the idle unit offline');
+        assert.equal((await call('GET', '/me/unit', { token: tokenB })).status, 404, 'B no longer has a unit');
     });
 });

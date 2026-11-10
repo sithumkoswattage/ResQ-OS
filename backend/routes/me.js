@@ -2,12 +2,12 @@
 const express = require('express');
 const User = require('../models/User');
 const Resource = require('../models/Resource');
-const Equipment = require('../models/Equipment');
 const audit = require('../services/audit');
 const { createResourceAlert } = require('../services/alertService');
 const { publishToDispatchers } = require('../services/events');
 const { getRoute } = require('../services/routing');
 const { isOnline } = require('../services/presence');
+const { crewOf, othersOnDuty, takeOfflineIfNobodyOnDuty } = require('../services/crew');
 
 const router = express.Router();
 
@@ -56,12 +56,18 @@ function serialize(unit) {
     };
 }
 
+// The unit plus its crew and whether the signed-in person is on duty.
+async function withCrew(req, payload) {
+    const crew = await crewOf(payload.unit._id);
+    const mine = crew.find((member) => String(member.id) === String(req.user.id));
+    return { ...payload, crew, onDuty: Boolean(mine?.onDuty) };
+}
+
 router.get('/unit', async (req, res) => {
     try {
         const unit = await loadUnit(req, res);
         if (!unit) return;
-        const equipment = await Equipment.find({ assignedUnit: unit._id }).select('assetTag name category quantity').lean();
-        return res.json({ ...serialize(unit), equipment });
+        return res.json(await withCrew(req, serialize(unit)));
     } catch (error) {
         return handleError(res, error);
     }
@@ -73,33 +79,38 @@ router.patch('/status', async (req, res) => {
         if (!['available', 'offline'].includes(status)) {
             return res.status(400).json({ message: 'Status must be "available" or "offline".' });
         }
+        // "available" = this person goes on duty; "offline" = this person goes off duty.
+        // The unit is online while anyone on its crew is on duty.
         const unit = await loadUnit(req, res);
         if (!unit) return;
         if (unit.status === 'suspended') {
             return res.status(409).json({ message: 'This unit has been suspended by an administrator.', code: 'unit_suspended' });
         }
-        if (unit.status === 'dispatched') {
-            return res.status(409).json({ message: 'Finish your current dispatch before changing availability.' });
+        const goingOn = status === 'available';
+        if (!goingOn && unit.status === 'dispatched' && !(await othersOnDuty(unit._id, req.user.id))) {
+            return res.status(409).json({ message: 'Finish your current dispatch before going off duty.' });
         }
 
-        const update = { status };
-        if (status === 'available') update.lastSeen = new Date();
-        const updated = await Resource.findOneAndUpdate(
-            { _id: unit._id, status: { $nin: ['dispatched', 'suspended'] } },
-            { $set: update },
-            { returnDocument: 'after' }
-        );
-        if (!updated) {
-            return res.status(409).json({ message: 'Finish your current dispatch before changing availability.' });
+        await User.updateOne({ _id: req.user.id }, { $set: { onDuty: goingOn, onDutyAt: goingOn ? new Date() : null } });
+        if (goingOn) {
+            await Resource.findOneAndUpdate(
+                { _id: unit._id, status: { $in: ['offline', 'available'] } },
+                { $set: { status: 'available', lastSeen: new Date() } }
+            );
+        } else {
+            await takeOfflineIfNobodyOnDuty(unit._id);
         }
+
+        const updated = await Resource.findById(unit._id);
         if (updated.status !== unit.status) {
             await createResourceAlert(updated, 'resource_status_changed');
         }
         publishToDispatchers('unit:status', { ...updated.toObject(), online: isOnline(updated) });
         await audit.fromReq(req, 'unit.status_changed', {
-            targetType: 'resource', targetId: updated._id, summary: `${updated.name} (${updated.unitCode}) went ${updated.status}`
+            targetType: 'resource', targetId: updated._id,
+            summary: `${req.user.username} went ${goingOn ? 'on' : 'off'} duty on ${updated.name} (${updated.unitCode}); the unit is ${updated.status}`
         });
-        return res.json({ unit: { ...updated.toObject(), online: isOnline(updated) } });
+        return res.json(await withCrew(req, { unit: { ...updated.toObject(), online: isOnline(updated) } }));
     } catch (error) {
         return handleError(res, error);
     }
@@ -114,8 +125,9 @@ router.post('/location', async (req, res) => {
         if (!valid) {
             return res.status(400).json({ message: 'Latitude and longitude must be numbers in decimal degrees.' });
         }
-        const user = await User.findById(req.user.id).select('unit').lean();
+        const user = await User.findById(req.user.id).select('unit onDuty').lean();
         if (!user?.unit) return res.status(404).json({ message: 'No unit is linked to this account.' });
+        if (!user.onDuty) return res.status(409).json({ message: 'Go on duty before sending location updates.' });
 
         const lastSeen = new Date();
         const updated = await Resource.findOneAndUpdate(
@@ -147,6 +159,9 @@ router.patch('/assignment', async (req, res) => {
         }
         const unit = await loadUnit(req, res);
         if (!unit) return;
+        if (!(await User.exists({ _id: req.user.id, onDuty: true }))) {
+            return res.status(409).json({ message: 'Go on duty to update the dispatch.' });
+        }
         if (unit.status !== 'dispatched' || !unit.assignedIncident) {
             return res.status(409).json({ message: 'This unit has no active dispatch.' });
         }
@@ -176,7 +191,7 @@ router.patch('/assignment', async (req, res) => {
         });
         publishToDispatchers('unit:status', { ...updated.toObject(), online: isOnline(updated) });
         await updated.populate('assignedIncident');
-        return res.json(serialize(updated));
+        return res.json(await withCrew(req, serialize(updated)));
     } catch (error) {
         return handleError(res, error);
     }

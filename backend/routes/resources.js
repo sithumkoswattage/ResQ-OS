@@ -2,11 +2,11 @@ const express = require('express');
 const Incident = require('../models/Incident');
 const Resource = require('../models/Resource');
 const User = require('../models/User');
-const Equipment = require('../models/Equipment');
 const audit = require('../services/audit');
 const { createResourceAlert } = require('../services/alertService');
 const { publishToDispatchers, publishToUnit } = require('../services/events');
 const { isOnline } = require('../services/presence');
+const { crewByUnit, othersOnDuty, takeOfflineIfNobodyOnDuty } = require('../services/crew');
 
 const router = express.Router();
 
@@ -33,17 +33,17 @@ router.get('/', async (req, res) => {
             .populate('assignedIncident', 'code title status')
             .sort({ unitCode: 1 })
             .lean();
-        const operators = await User.find({ unit: { $ne: null } }).select('username email unit').lean();
-        const operatorByUnit = new Map(operators.map((user) => [String(user.unit), {
-            id: user._id,
-            username: user.username,
-            email: user.email
-        }]));
-        return res.json(resources.map((resource) => ({
-            ...resource,
-            online: isOnline(resource),
-            operator: operatorByUnit.get(String(resource._id)) || null
-        })));
+        const crews = await crewByUnit();
+        return res.json(resources.map((resource) => {
+            const crew = crews.get(String(resource._id)) || [];
+            return {
+                ...resource,
+                online: isOnline(resource),
+                crew,
+                // First person on duty (or first on the crew): kept for screens that show one name.
+                operator: crew.find((m) => m.onDuty) || crew[0] || null
+            };
+        }));
     } catch (error) {
         return handleError(res, error);
     }
@@ -199,11 +199,15 @@ router.put('/:id/operator', async (req, res) => {
         }
 
         if (req.body.email === null) {
-            await User.updateMany({ unit: resource._id }, { $set: { unit: null } });
+            if (resource.status === 'dispatched') {
+                return res.status(409).json({ message: 'Release the unit from its incident before removing its crew.' });
+            }
+            await User.updateMany({ unit: resource._id }, { $set: { unit: null, onDuty: false, onDutyAt: null } });
+            await takeOfflineIfNobodyOnDuty(resource._id);
             await audit.fromReq(req, 'resource.operator_unlinked', {
-                targetType: 'resource', targetId: resource._id, summary: `Unlinked the operator from ${resource.unitCode}`
+                targetType: 'resource', targetId: resource._id, summary: `Removed the whole crew from ${resource.unitCode}`
             });
-            return res.json({ operator: null });
+            return res.json({ operator: null, crew: [] });
         }
 
         const email = String(req.body.email).trim();
@@ -213,14 +217,37 @@ router.put('/:id/operator', async (req, res) => {
             return res.status(409).json({ message: 'That account is already linked to another unit.' });
         }
 
-        // One operator per unit: unlink anyone else first.
-        await User.updateMany({ unit: resource._id, _id: { $ne: user._id } }, { $set: { unit: null } });
+        // Adds the person to the unit's crew; people already on it stay.
         user.unit = resource._id;
         await user.save();
         await audit.fromReq(req, 'resource.operator_linked', {
-            targetType: 'resource', targetId: resource._id, summary: `Linked "${user.username}" to ${resource.unitCode}`
+            targetType: 'resource', targetId: resource._id, summary: `Added "${user.username}" to the crew of ${resource.unitCode}`
         });
         return res.json({ operator: { id: user._id, username: user.username, email: user.email } });
+    } catch (error) {
+        return handleError(res, error);
+    }
+});
+
+// Removes one person from the unit's crew.
+router.delete('/:id/crew/:userId', async (req, res) => {
+    try {
+        const resource = await Resource.findById(req.params.id);
+        if (!resource) return res.status(404).json({ message: 'Resource not found.' });
+        const member = await User.findOne({ _id: req.params.userId, unit: resource._id });
+        if (!member) return res.status(404).json({ message: 'That person is not on this unit.' });
+        if (resource.status === 'dispatched' && !(await othersOnDuty(resource._id, member._id))) {
+            return res.status(409).json({ message: 'Release the unit from its incident before removing the last person on duty.' });
+        }
+        member.unit = null;
+        member.onDuty = false;
+        member.onDutyAt = null;
+        await member.save();
+        await takeOfflineIfNobodyOnDuty(resource._id);
+        await audit.fromReq(req, 'resource.operator_unlinked', {
+            targetType: 'resource', targetId: resource._id, summary: `Removed "${member.username}" from the crew of ${resource.unitCode}`
+        });
+        return res.status(204).end();
     } catch (error) {
         return handleError(res, error);
     }
@@ -234,8 +261,7 @@ router.delete('/:id', async (req, res) => {
             return res.status(409).json({ message: 'Unassign this resource before removing it.' });
         }
         await resource.deleteOne();
-        await User.updateMany({ unit: resource._id }, { $set: { unit: null } });
-        await Equipment.updateMany({ assignedUnit: resource._id }, { $set: { assignedUnit: null } });
+        await User.updateMany({ unit: resource._id }, { $set: { unit: null, onDuty: false, onDutyAt: null } });
         await audit.fromReq(req, 'resource.deleted', {
             targetType: 'resource', targetId: resource._id, summary: `Removed ${resource.name} (${resource.unitCode})`
         });

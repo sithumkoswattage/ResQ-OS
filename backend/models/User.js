@@ -9,10 +9,13 @@ const userSchema = new mongoose.Schema({
     suspendedReason: { type: String, default: null, maxlength: 200 },
     suspendedAt: { type: Date, default: null },
     lastLoginAt: { type: Date, default: null },
-    // Responder accounts operate exactly one unit; dispatchers leave this empty.
-    unit: { type: mongoose.Schema.Types.ObjectId, ref: 'Resource', default: null }
+    // A responder belongs to one unit (its crew can have several people); dispatchers leave this empty.
+    unit: { type: mongoose.Schema.Types.ObjectId, ref: 'Resource', default: null },
+    // On duty = this person is working the unit now. A unit is online while anyone on its crew is on duty.
+    onDuty: { type: Boolean, default: false },
+    onDutyAt: { type: Date, default: null }
 }, { timestamps: true });
 
-userSchema.index({ unit: 1 }, { unique: true, partialFilterExpression: { unit: { $type: 'objectId' } } });
+userSchema.index({ unit: 1 });
 
 module.exports = mongoose.model('User', userSchema);
