@@ -7,12 +7,12 @@ Errors are always `{ "message": "...", "code"?: "..." }`.
 |---|---|
 | 400 | Validation problem (show `message`) |
 | **401** | Not signed in / token expired. `code` is `token_missing`, `token_invalid` or `token_expired`. **Clear the token and go to login.** |
-| 403 | Signed in but wrong role |
+| 403 | Signed in but wrong role, **or** `code: "account_suspended"` (an administrator suspended the account: sign out and show `message`) |
 | 404 | Not found |
 | 409 | Conflict (someone else changed it, wrong state). Show `message`, refresh data |
 | 429 | Rate limited (login: 20 / 15 min, register: 10 / hour per IP) |
 
-Roles: `dispatcher` (incidents, resources, command-center, alerts) and `responder` (the `/me` field-unit endpoints). Both can use `/route` and `/stream`.
+Roles: `dispatcher` (incidents, resources, command-center, alerts, read-only equipment), `responder` (the `/me` field-unit endpoints) and `admin` (everything a dispatcher can do, plus `/admin/*` and equipment writes). All can use `/route` and `/stream`. The server re-checks the account on every request, so suspensions and role changes apply immediately. The login screen has no role picker: `POST /auth/login` takes `identifier` + `password` and returns the account's `role`.
 
 ---
 
@@ -57,6 +57,8 @@ Query: `limit` (1-20, default 5), `type` (substring filter, e.g. `ambulance`), `
 
 `progress` is `null` (not dispatched), `assigned`, `accepted` or `on_scene`.
 
+`status` is `available`, `dispatched`, `offline` or **`suspended`**. Only an admin can suspend/reactivate (see below); dispatchers cannot set it, edit a suspended unit, or dispatch it (409). `GET /command-center/overview` summary also has `suspendedResources`.
+
 ---
 
 ## Field unit (responder) — `/me`
@@ -96,3 +98,41 @@ Every event's `data` is JSON.
 | `dispatch:released` | that unit's responder | `{ incidentId }` (released or incident resolved) |
 
 Alerts (`GET /alerts`...) still work as before; new alert type `resource_progress` ("Dispatch accepted" / "Unit on scene").
+
+---
+
+## Administrator (`/admin`, role `admin` only)
+
+| | |
+|---|---|
+| `GET /admin/overview` | `{ users: {total, byRole, suspended, online}, units: {total, byStatus, online}, incidents: {active, last24h}, equipment: {total, byStatus, unassigned, serviceOverdue}, onlineUsers: [...], recentActivity: [...15 audit entries] }` |
+| `GET /admin/presence` | `{ onlineUsers: [{ userId, username, role, connections, since }] }`: accounts with an open live stream right now. |
+| `GET /admin/audit` | Activity log, newest first. Query: `limit` (<=100), `category` (`auth\|incident\|resource\|unit\|user\|equipment`), `action` (exact, e.g. `user.suspended`), `actorId`, `targetType`, `before` (ISO date; use the returned `nextBefore` to page). Returns `{ entries, nextBefore }`; an entry is `{ _id, actorId, actorName, actorRole, action, targetType, targetId, summary, meta, ip, createdAt }`. |
+| `GET /admin/users` | All accounts (no passwords) with `online`, `suspended`, `suspendedReason`, `lastLoginAt` and `unit` (`{unitCode, name, status}`). |
+| `POST /admin/users` | `{ username, email, password (8+), role: "dispatcher"\|"responder"\|"admin" }` -> 201. 409 if the username/email exists. |
+| `PATCH /admin/users/:id` | Any of `username`, `email`, `role`. You cannot change your own role; the last active admin cannot be demoted (409). Moving someone off `responder` unlinks their unit. |
+| `POST /admin/users/:id/suspend` | `{ reason? }`. Signs them out of live streams immediately; their next request gets 403 `account_suspended`. Not allowed on yourself or the last active admin (409). |
+| `POST /admin/users/:id/reactivate` | Lifts the suspension. |
+| `POST /admin/users/:id/reset-password` | `{ password (8+) }`. Existing sessions stay valid until they expire; suspend first to cut them off. |
+| `POST /admin/units/:id/suspend` | `{ reason?, force? }`. A dispatched unit returns 409 `code: "unit_dispatched"` unless `force: true`, which releases it from its incident. The unit's operator gets `unit:suspended` (+ `dispatch:released`). |
+| `POST /admin/units/:id/reactivate` | Suspended -> `offline` (the operator must go online again). |
+
+Registering, editing and deleting units, and linking operators, use the existing `/resources` endpoints, which admins can call too.
+
+### Equipment (`/equipment`; dispatchers and admins read, admins write)
+
+| | |
+|---|---|
+| `GET /equipment` | Query: `status`, `category`, `assignedUnit` (unit id or `none`), `q` (name/asset tag). Items: `{ _id, assetTag, name, category, status, quantity, assignedUnit: {unitCode, name, status}\|null, notes, nextServiceDue }`. |
+| `POST /equipment` (admin) | `assetTag` (unique, upper-cased), `name`, optional `category` (`medical\|firefighting\|rescue\|communication\|protective\|vehicle\|other`), `status` (`serviceable\|maintenance\|retired`), `quantity`, `notes`, `nextServiceDue`, `assignedUnit`. |
+| `PATCH /equipment/:id` (admin) | Same fields. Setting `maintenance` or `retired` unassigns it. |
+| `POST /equipment/:id/assign` (admin) | `{ unitId }` or `{ unitId: null }`. Only serviceable gear can be assigned. |
+| `DELETE /equipment/:id` (admin) | 204. |
+
+`GET /me/unit` now also returns `equipment` (the gear assigned to the responder's unit).
+
+### Live events for admins
+Admins receive every dispatcher event, plus: `audit:new` (an audit entry), `presence:changed` (`{ userId, username, role, online, connections }`). Any user whose account is suspended receives `account:suspended` and the stream closes. A suspended unit's operator receives `unit:suspended` `{ reason }`.
+
+### Audit actions recorded
+`auth.login`, `auth.login_failed`, `auth.login_blocked`, `incident.created|updated|resolved`, `resource.created|updated|deleted|dispatched|released|operator_linked|operator_unlinked`, `unit.status_changed|accepted|on_scene|completed|suspended|reactivated`, `user.created|updated|suspended|reactivated|password_reset`, `equipment.created|updated|assigned|unassigned|deleted`.
