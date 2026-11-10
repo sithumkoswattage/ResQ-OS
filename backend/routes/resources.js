@@ -2,6 +2,8 @@ const express = require('express');
 const Incident = require('../models/Incident');
 const Resource = require('../models/Resource');
 const User = require('../models/User');
+const Equipment = require('../models/Equipment');
+const audit = require('../services/audit');
 const { createResourceAlert } = require('../services/alertService');
 const { publishToDispatchers, publishToUnit } = require('../services/events');
 const { isOnline } = require('../services/presence');
@@ -52,6 +54,9 @@ router.post('/', async (req, res) => {
         if (req.body.status === 'dispatched') {
             return res.status(400).json({ message: 'Assign a resource to an incident to mark it dispatched.' });
         }
+        if (req.body.status === 'suspended') {
+            return res.status(400).json({ message: 'Use the administrator suspend action to suspend a unit.' });
+        }
         const resource = await Resource.create({
             unitCode: req.body.unitCode,
             name: req.body.name,
@@ -61,6 +66,9 @@ router.post('/', async (req, res) => {
             status: req.body.status
         });
         await createResourceAlert(resource, 'resource_added');
+        await audit.fromReq(req, 'resource.created', {
+            targetType: 'resource', targetId: resource._id, summary: `Registered ${resource.name} (${resource.unitCode})`
+        });
         publishToDispatchers('unit:status', resource.toObject());
         return res.status(201).json(resource);
     } catch (error) {
@@ -75,6 +83,9 @@ router.patch('/:id', async (req, res) => {
         if (resource.status === 'dispatched') {
             return res.status(409).json({ message: 'Unassign this resource before editing its details.' });
         }
+        if (resource.status === 'suspended') {
+            return res.status(409).json({ message: 'This unit is suspended by an administrator. Reactivate it before editing.' });
+        }
 
         const previousStatus = resource.status;
         for (const field of ['unitCode', 'name', 'type', 'latitude', 'longitude', 'status']) {
@@ -83,10 +94,16 @@ router.patch('/:id', async (req, res) => {
         if (resource.status === 'dispatched') {
             return res.status(400).json({ message: 'Assign a resource to an incident to mark it dispatched.' });
         }
+        if (resource.status === 'suspended') {
+            return res.status(400).json({ message: 'Use the administrator suspend action to suspend a unit.' });
+        }
         await resource.save();
         if (resource.status !== previousStatus) {
             await createResourceAlert(resource, 'resource_status_changed');
         }
+        await audit.fromReq(req, 'resource.updated', {
+            targetType: 'resource', targetId: resource._id, summary: `Updated ${resource.name} (${resource.unitCode})`
+        });
         publishToDispatchers('unit:status', { ...resource.toObject(), online: isOnline(resource) });
         return res.json(resource);
     } catch (error) {
@@ -111,10 +128,13 @@ router.patch('/:id/assignment', async (req, res) => {
         // cannot both claim the same unit.
         const guard = { _id: resource._id, assignedIncident: resource.assignedIncident ?? null };
         if (releasing) {
+            if (resource.status === 'suspended') {
+                return res.status(409).json({ message: 'This unit is suspended by an administrator.' });
+            }
             update = { assignedIncident: null, status: 'available', progress: null };
         } else {
-            if (resource.status === 'offline') {
-                return res.status(409).json({ message: 'An offline resource cannot be dispatched.' });
+            if (resource.status === 'offline' || resource.status === 'suspended') {
+                return res.status(409).json({ message: `A ${resource.status} resource cannot be dispatched.` });
             }
             const incident = await Incident.findById(incidentId);
             if (!incident) return res.status(404).json({ message: 'Incident not found.' });
@@ -152,6 +172,17 @@ router.patch('/:id/assignment', async (req, res) => {
         } else if (previousIncidentId) {
             publishToUnit(resource._id, 'dispatch:released', { incidentId: previousIncidentId });
         }
+        if (dispatchedIncident) {
+            await audit.fromReq(req, 'resource.dispatched', {
+                targetType: 'resource', targetId: resource._id,
+                summary: `Dispatched ${resource.name} (${resource.unitCode}) to ${dispatchedIncident.code}`,
+                meta: { incidentId: String(dispatchedIncident._id) }
+            });
+        } else if (previousIncidentId) {
+            await audit.fromReq(req, 'resource.released', {
+                targetType: 'resource', targetId: resource._id, summary: `Released ${resource.name} (${resource.unitCode})`
+            });
+        }
         await resource.populate('assignedIncident', 'code title status');
         return res.json(resource);
     } catch (error) {
@@ -169,6 +200,9 @@ router.put('/:id/operator', async (req, res) => {
 
         if (req.body.email === null) {
             await User.updateMany({ unit: resource._id }, { $set: { unit: null } });
+            await audit.fromReq(req, 'resource.operator_unlinked', {
+                targetType: 'resource', targetId: resource._id, summary: `Unlinked the operator from ${resource.unitCode}`
+            });
             return res.json({ operator: null });
         }
 
@@ -183,6 +217,9 @@ router.put('/:id/operator', async (req, res) => {
         await User.updateMany({ unit: resource._id, _id: { $ne: user._id } }, { $set: { unit: null } });
         user.unit = resource._id;
         await user.save();
+        await audit.fromReq(req, 'resource.operator_linked', {
+            targetType: 'resource', targetId: resource._id, summary: `Linked "${user.username}" to ${resource.unitCode}`
+        });
         return res.json({ operator: { id: user._id, username: user.username, email: user.email } });
     } catch (error) {
         return handleError(res, error);
@@ -198,6 +235,10 @@ router.delete('/:id', async (req, res) => {
         }
         await resource.deleteOne();
         await User.updateMany({ unit: resource._id }, { $set: { unit: null } });
+        await Equipment.updateMany({ assignedUnit: resource._id }, { $set: { assignedUnit: null } });
+        await audit.fromReq(req, 'resource.deleted', {
+            targetType: 'resource', targetId: resource._id, summary: `Removed ${resource.name} (${resource.unitCode})`
+        });
         publishToDispatchers('unit:removed', { resourceId: resource._id });
         await createResourceAlert(resource, 'resource_removed');
         return res.status(204).end();

@@ -2,6 +2,8 @@
 const express = require('express');
 const User = require('../models/User');
 const Resource = require('../models/Resource');
+const Equipment = require('../models/Equipment');
+const audit = require('../services/audit');
 const { createResourceAlert } = require('../services/alertService');
 const { publishToDispatchers } = require('../services/events');
 const { getRoute } = require('../services/routing');
@@ -58,7 +60,8 @@ router.get('/unit', async (req, res) => {
     try {
         const unit = await loadUnit(req, res);
         if (!unit) return;
-        return res.json(serialize(unit));
+        const equipment = await Equipment.find({ assignedUnit: unit._id }).select('assetTag name category quantity').lean();
+        return res.json({ ...serialize(unit), equipment });
     } catch (error) {
         return handleError(res, error);
     }
@@ -72,6 +75,9 @@ router.patch('/status', async (req, res) => {
         }
         const unit = await loadUnit(req, res);
         if (!unit) return;
+        if (unit.status === 'suspended') {
+            return res.status(409).json({ message: 'This unit has been suspended by an administrator.', code: 'unit_suspended' });
+        }
         if (unit.status === 'dispatched') {
             return res.status(409).json({ message: 'Finish your current dispatch before changing availability.' });
         }
@@ -79,7 +85,7 @@ router.patch('/status', async (req, res) => {
         const update = { status };
         if (status === 'available') update.lastSeen = new Date();
         const updated = await Resource.findOneAndUpdate(
-            { _id: unit._id, status: { $ne: 'dispatched' } },
+            { _id: unit._id, status: { $nin: ['dispatched', 'suspended'] } },
             { $set: update },
             { returnDocument: 'after' }
         );
@@ -90,6 +96,9 @@ router.patch('/status', async (req, res) => {
             await createResourceAlert(updated, 'resource_status_changed');
         }
         publishToDispatchers('unit:status', { ...updated.toObject(), online: isOnline(updated) });
+        await audit.fromReq(req, 'unit.status_changed', {
+            targetType: 'resource', targetId: updated._id, summary: `${updated.name} (${updated.unitCode}) went ${updated.status}`
+        });
         return res.json({ unit: { ...updated.toObject(), online: isOnline(updated) } });
     } catch (error) {
         return handleError(res, error);
@@ -110,7 +119,7 @@ router.post('/location', async (req, res) => {
 
         const lastSeen = new Date();
         const updated = await Resource.findOneAndUpdate(
-            { _id: user.unit, status: { $ne: 'offline' } },
+            { _id: user.unit, status: { $nin: ['offline', 'suspended'] } },
             { $set: { latitude, longitude, lastSeen } },
             { returnDocument: 'after' }
         );
@@ -160,6 +169,11 @@ router.patch('/assignment', async (req, res) => {
         }
 
         await createResourceAlert(updated, progress === 'completed' ? 'resource_released' : 'resource_progress', incident);
+        await audit.fromReq(req, `unit.${progress}`, {
+            targetType: 'resource', targetId: updated._id,
+            summary: `${updated.name} (${updated.unitCode}) ${progress === 'completed' ? 'completed' : progress === 'on_scene' ? 'is on scene at' : 'accepted'} ${incident.code}`,
+            meta: { incidentId: String(incident._id) }
+        });
         publishToDispatchers('unit:status', { ...updated.toObject(), online: isOnline(updated) });
         await updated.populate('assignedIncident');
         return res.json(serialize(updated));

@@ -4,20 +4,21 @@
 const express = require('express');
 const User = require('../models/User');
 const { verifyToken } = require('../middleware/auth');
+const { requireActiveAccount } = require('../middleware/account');
 const { issueTicket, consumeTicket, TICKET_TTL_MS } = require('../services/streamTickets');
-const { addClient, send } = require('../services/events');
+const { addClient, send, publishToAdmins, connectionsFor } = require('../services/events');
 
 const router = express.Router();
 const HEARTBEAT_MS = 25 * 1000;
 
-router.post('/ticket', verifyToken, async (req, res) => {
+router.post('/ticket', verifyToken, requireActiveAccount, async (req, res) => {
     try {
         let unitId = null;
         if (req.user.role === 'responder') {
             const user = await User.findById(req.user.id).select('unit').lean();
             unitId = user?.unit || null;
         }
-        const ticket = issueTicket({ userId: req.user.id, role: req.user.role, unitId });
+        const ticket = issueTicket({ userId: req.user.id, username: req.user.username, role: req.user.role, unitId });
         return res.status(201).json({ ticket, expiresInSeconds: TICKET_TTL_MS / 1000 });
     } catch (error) {
         console.error('Stream ticket error:', error);
@@ -40,14 +41,23 @@ router.get('/', (req, res) => {
     res.flushHeaders();
     res.write('retry: 3000\n\n');
 
-    const client = { res, role: session.role, unitId: session.unitId };
+    const client = { res, role: session.role, unitId: session.unitId, userId: session.userId, username: session.username };
     const remove = addClient(client);
     send(client, 'connected', { role: session.role, unitId: session.unitId ? String(session.unitId) : null });
+    publishToAdmins('presence:changed', {
+        userId: String(session.userId), username: session.username, role: session.role,
+        online: true, connections: connectionsFor(session.userId)
+    });
 
     const heartbeat = setInterval(() => res.write(': ping\n\n'), HEARTBEAT_MS);
     req.on('close', () => {
         clearInterval(heartbeat);
         remove();
+        const connections = connectionsFor(session.userId);
+        publishToAdmins('presence:changed', {
+            userId: String(session.userId), username: session.username, role: session.role,
+            online: connections > 0, connections
+        });
     });
 });
 

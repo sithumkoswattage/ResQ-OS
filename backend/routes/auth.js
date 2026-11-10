@@ -3,6 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const audit = require('../services/audit');
 
 router.post('/register', async (req, res) => {
     try {
@@ -42,12 +43,21 @@ router.post('/login', async (req, res) => {
         const user = await User.findOne({
             $or: [{ email: loginId }, { username: loginId }]
         });
-        if (!user) return res.status(400).json({ message: "Invalid credentials" });
+        if (!user) {
+            await audit.record({ actorName: String(loginId).slice(0, 120), action: 'auth.login_failed', targetType: 'session', ip: req.ip, summary: 'Sign-in with an unknown account' });
+            return res.status(400).json({ message: "Invalid credentials" });
+        }
 
         const isMatch = await bcrypt.compare(password, user.password);
 
         if (!isMatch) {
+            await audit.record({ actorName: String(loginId).slice(0, 120), action: 'auth.login_failed', targetType: 'session', targetId: user._id, ip: req.ip, summary: `Wrong password for "${user.username}"` });
             return res.status(400).json({ message: "Invalid credentials" });
+        }
+
+        if (user.suspended) {
+            await audit.record({ actorId: user._id, actorName: user.username, actorRole: user.role, action: 'auth.login_blocked', targetType: 'session', ip: req.ip, summary: `Suspended account "${user.username}" tried to sign in` });
+            return res.status(403).json({ message: "This account has been suspended. Please contact an administrator.", code: 'account_suspended' });
         }
 
 
@@ -66,6 +76,10 @@ router.post('/login', async (req, res) => {
             process.env.JWT_SECRET,
             { expiresIn: '8h' }
         );
+
+        user.lastLoginAt = new Date();
+        await user.save();
+        await audit.record({ actorId: user._id, actorName: user.username, actorRole: user.role, action: 'auth.login', targetType: 'session', ip: req.ip, summary: `${user.username} signed in` });
 
         res.json({
             token,

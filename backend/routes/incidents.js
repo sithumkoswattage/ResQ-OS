@@ -4,6 +4,7 @@ const Resource = require('../models/Resource');
 const { createIncidentAlert, createResourceAlert } = require('../services/alertService');
 const { rankByDistance } = require('../services/geo');
 const { getRoute } = require('../services/routing');
+const audit = require('../services/audit');
 const { isOnline } = require('../services/presence');
 const { publishToDispatchers, publishToUnit } = require('../services/events');
 
@@ -47,6 +48,10 @@ router.post('/', async (req, res) => {
             priority: req.body.priority
         });
         await createIncidentAlert(incident);
+        await audit.fromReq(req, 'incident.created', {
+            targetType: 'incident', targetId: incident._id, summary: `Created ${incident.code}: ${incident.title}`,
+            meta: { priority: incident.priority }
+        });
         publishToDispatchers('incident:created', incident.toObject());
         return res.status(201).json(incident);
     } catch (error) {
@@ -149,6 +154,11 @@ router.patch('/:id', async (req, res) => {
                 });
             }
         }
+        const resolvedNow = incident.status === 'resolved' && currentIncident.status !== 'resolved';
+        await audit.fromReq(req, resolvedNow ? 'incident.resolved' : 'incident.updated', {
+            targetType: 'incident', targetId: incident._id,
+            summary: `${resolvedNow ? 'Resolved' : 'Updated'} ${incident.code}: ${incident.title}`
+        });
         publishToDispatchers('incident:updated', incident.toObject());
 
         return res.json(incident);
