@@ -1,0 +1,14 @@
+# Local Jenkins:  docker compose -f jenkins/docker-compose.yml up -d --build
+# Open http://localhost:8080
+services:
+  jenkins:
+    build: .
+    user: root
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+volumes:
+  jenkins_home:
