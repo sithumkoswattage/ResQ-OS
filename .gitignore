@@ -1,3 +1,9 @@
 node_modules/
 .env
 .DS_Store
+# CD pipeline
+deploy/terraform/.terraform/
+deploy/terraform/*.tfstate*
+deploy/ansible/key.pem
+deploy/ansible/inventory.ini
+deployed_url.txt
