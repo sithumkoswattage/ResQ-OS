@@ -1,0 +1,38 @@
+# Production stack on the Azure VM. Images come from Docker Hub (built by the images pipeline).
+# Values come from the .env file that Ansible writes next to this file.
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: ${DOCKERHUB_USER}/resqos-backend:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      PORT: 5000
+      MONGO_URI: mongodb://mongo:27017/resqos
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGINS: ${PUBLIC_URL}
+      TRUST_PROXY: 1
+      NODE_OPTIONS: --network-family-autoselection-attempt-timeout=2000
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  frontend:
+    image: ${DOCKERHUB_USER}/resqos-frontend:${IMAGE_TAG}
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+    depends_on:
+      - backend
+
+volumes:
+  mongo-data:

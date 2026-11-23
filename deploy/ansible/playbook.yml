@@ -1,0 +1,90 @@
+# Installs Docker on the VM and runs the ResQ-OS stack from Docker Hub images.
+# Required extra vars: dockerhub_user, image_tag, jwt_secret, public_url
+- name: Deploy ResQ-OS
+  hosts: resqos
+  become: true
+  vars:
+    app_dir: /opt/resqos
+  tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+
+    - name: Install Docker and the compose plugin
+      ansible.builtin.apt:
+        name: [docker.io, docker-compose-v2, curl]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Start Docker on boot
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    # 1 GB RAM is tight for MongoDB + Node + nginx, so give the VM some swap.
+    - name: Create swap file
+      ansible.builtin.command: fallocate -l 1G /swapfile
+      args:
+        creates: /swapfile
+
+    - name: Secure swap file
+      ansible.builtin.file:
+        path: /swapfile
+        mode: "0600"
+
+    - name: Format swap file
+      ansible.builtin.command: mkswap /swapfile
+      register: mkswap
+      changed_when: "'Setting up swapspace' in mkswap.stdout"
+      when: ansible_swaptotal_mb == 0
+
+    - name: Enable swap
+      ansible.builtin.command: swapon /swapfile
+      when: ansible_swaptotal_mb == 0
+
+    - name: Keep swap across reboots
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: "/swapfile none swap sw 0 0"
+
+    - name: Create app directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copy compose file
+      ansible.builtin.copy:
+        src: ../docker-compose.prod.yml
+        dest: "{{ app_dir }}/docker-compose.yml"
+        mode: "0644"
+
+    - name: Write environment file
+      ansible.builtin.template:
+        src: env.j2
+        dest: "{{ app_dir }}/.env"
+        mode: "0600"
+      no_log: true
+
+    - name: Pull images
+      ansible.builtin.command: docker compose pull
+      args:
+        chdir: "{{ app_dir }}"
+      changed_when: true
+
+    - name: Start the stack
+      ansible.builtin.command: docker compose up -d --remove-orphans
+      args:
+        chdir: "{{ app_dir }}"
+      changed_when: true
+
+    - name: Wait for the API to answer through nginx
+      ansible.builtin.uri:
+        url: http://localhost/api/health
+        status_code: 200
+      register: health
+      retries: 30
+      delay: 5
+      until: health.status == 200
